@@ -1,0 +1,6 @@
+# Use an environment variable; do not hardcode a personal absolute path.
+datasets_catalog_root: ${PD_DATASETS_CATALOG_ROOT}
+
+datasets:
+  vsb: ${PD_DATASETS_CATALOG_ROOT}/data/raw/dataset-vsb-power-line-fault-detection
+  pd_noise: ${PD_DATASETS_CATALOG_ROOT}/data/raw/dataset-pd-noise

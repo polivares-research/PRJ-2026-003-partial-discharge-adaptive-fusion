@@ -1,0 +1,24 @@
+dataset_id: engineering-partial-discharge-noise-signals
+catalog_relative_path: data/raw/dataset-pd-noise
+source: Figshare / Andreas Rauscher et al.
+version: v1
+files:
+  tuning_train: Tr0.mat
+  tuning_validation: Va0.mat
+  tuning_test: Te0.mat
+  train: Tr1.mat
+  validation: Va1.mat
+  test: Te1.mat
+  generalization_test: Te2.mat
+structure:
+  samples_per_signal: 400
+  classes: [PD, NonPD]
+  class_balance_reported: true
+split_policy:
+  preserve_source_partitions: true
+  generalization_partition: Te2
+  te2_used_for_hyperparameter_selection: false
+review_status:
+  license: pending_manual_verification
+  matlab_struct_schema: pending_manual_verification
+  stator_object_mapping: pending_manual_verification

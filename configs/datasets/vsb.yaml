@@ -1,0 +1,26 @@
+dataset_id: engineering-vsb-power-line-fault-detection
+catalog_relative_path: data/raw/dataset-vsb-power-line-fault-detection
+source: Kaggle / ENET Centre / VSB Technical University of Ostrava
+version: 2018-kaggle-snapshot
+files:
+  train_signals: train.parquet
+  test_signals: test.parquet
+  train_metadata: metadata_train.csv
+  test_metadata: metadata_test.csv
+  sample_submission: sample_submission.csv
+structure:
+  samples_per_signal: 800000
+  phases_per_measurement: 3
+  sampling_frequency_hz: 40000000
+  train_signals: 8712
+  test_signals: 20337
+  positive_train_signals: 525
+  negative_train_signals: 8187
+split_policy:
+  grouping_key: id_measurement
+  keep_measurement_phases_together: true
+  public_test_labels_available: false
+review_status:
+  license: pending_manual_verification
+  parquet_schema: pending_manual_verification
+  amplitude_units: pending_manual_verification
