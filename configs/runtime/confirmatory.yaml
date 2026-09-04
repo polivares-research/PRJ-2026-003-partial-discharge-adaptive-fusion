@@ -1,0 +1,19 @@
+# Reference runtime companion for the original v1 batch-128 protocol.
+# The active low-memory execution uses confirmatory-batch4.yaml.
+runtime_config_version: confirmatory-v1
+environment: partial-discharge
+device_policy: cuda_required
+seeds: [42, 43, 44, 45, 46]
+torch_threads: 2
+training_batch_size: 128
+inference_batch_size: 512
+representation_cache:
+  storage: external_or_ignored_memmap
+  deterministic: true
+  dataset_specific: true
+artifacts:
+  results_root: results/runs
+  reports_root: reports
+  predictions_format: parquet
+  summaries_format: csv
+  configuration_format: yaml

@@ -1,0 +1,12 @@
+representation: temporal
+config_version: temporal-poc4-inherited-v1
+matlab:
+  input_length: 400
+  normalization: z_score_fit_on_train_only
+  channels: 1
+vsb:
+  status: frozen_after_native_signal_audit
+  input_length: 800000
+  resampling: none
+  window: none
+  normalization: dataset_specific_but_train_only

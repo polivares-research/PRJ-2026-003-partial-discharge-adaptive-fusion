@@ -1,0 +1,20 @@
+representation: continuous_wavelet_transform
+config_version: cwt-poc4-inherited-v1
+matlab:
+  wavelet: complex_morlet
+  morlet_w0: 6.0
+  scales_min: 1.5
+  scales_max: 64.0
+  n_scales: 32
+  time_bins: 120
+  transform: log_power
+  clip_floor: -10.0
+  normalization: z_score_fit_on_train_only
+vsb:
+  status: frozen_after_native_signal_audit
+  input_length: 800000
+  sampling_frequency_hz: 40000000
+  duration_seconds: 0.02
+  resampling: none
+  window: none
+  wavelet_concept: continuous_wavelet_transform

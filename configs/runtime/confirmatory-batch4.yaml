@@ -1,0 +1,18 @@
+runtime_config_version: confirmatory-v2-batch4
+environment: partial-discharge
+device_policy: cuda_required
+seeds: [42, 43, 44, 45, 46]
+training_batch_size: 4
+inference_batch_size: 4
+gradient_accumulation_steps: 1
+torch_threads: 2
+representation_cache:
+  storage: external_or_ignored_memmap
+  deterministic: true
+  dataset_specific: true
+artifacts:
+  results_root: results/runs
+  reports_root: reports
+  predictions_format: parquet
+  summaries_format: csv
+  configuration_format: yaml
