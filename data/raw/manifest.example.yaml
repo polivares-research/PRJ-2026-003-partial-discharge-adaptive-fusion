@@ -1,0 +1,25 @@
+manifest_version: 1
+data_source: local_raw
+root_environment_variable: PD_RAW_DATA_ROOT
+required_files:
+  dataset-pd-noise:
+    - Tr1.mat
+    - Va1.mat
+    - Te1.mat
+    - Te2.mat
+  dataset-vsb-power-line-fault-detection:
+    - train.parquet
+    - metadata_train.csv
+optional_files:
+  dataset-pd-noise:
+    - Tr0.mat
+    - Va0.mat
+    - Te0.mat
+    - readme.txt
+    - 24033225.xml
+    - 1-s2.0-S095219762400232X-main.pdf
+  dataset-vsb-power-line-fault-detection:
+    - test.parquet
+    - metadata_test.csv
+    - sample_submission.csv
+    - source_metadata.yaml

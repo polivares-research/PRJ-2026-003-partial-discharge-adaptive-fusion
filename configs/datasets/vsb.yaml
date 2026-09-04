@@ -1,5 +1,5 @@
 dataset_id: engineering-vsb-power-line-fault-detection
-catalog_relative_path: data/raw/dataset-vsb-power-line-fault-detection
+raw_relative_path: dataset-vsb-power-line-fault-detection
 source: Kaggle / ENET Centre / VSB Technical University of Ostrava
 version: 2018-kaggle-snapshot
 files:
@@ -24,3 +24,6 @@ review_status:
   license: pending_manual_verification
   parquet_schema: pending_manual_verification
   amplitude_units: pending_manual_verification
+runtime_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT

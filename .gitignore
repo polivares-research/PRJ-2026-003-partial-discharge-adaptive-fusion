@@ -50,6 +50,9 @@ data/splits/**
 !data/interim/README.md
 !data/processed/README.md
 !data/splits/README.md
+!data/raw/
+!data/raw/README.md
+!data/raw/manifest.example.yaml
 *.parquet
 *.parquet.zip
 *.mat
@@ -89,6 +92,24 @@ mlruns/
 outputs/
 tmp/
 *.jsonl
+
+# Confirmatory generated arrays, predictions and per-run artifacts
+results/cache/**
+results/runs/**
+results/predictions/**
+results/features/**
+# Row-level MATLAB manifest is regenerated deterministically and is too large
+# for the source repository; compact protocol manifests remain trackable.
+results/manifests/matlab_manifest.csv
+reports/figures/confirmatory/**
+reports/metrics/confirmatory/**
+reports/statistical_analysis/confirmatory/**
+
+# Historical PoC generated data; keep only compact notes/tables explicitly.
+poc/results/**/*.dat
+poc/results/**/*predictions*.csv
+poc/results/**/*predictions*.csv.gz
+poc/results/**/*.zip
 
 # Generated reports; curated tables/figures may be force-added deliberately
 reports/**/*.html

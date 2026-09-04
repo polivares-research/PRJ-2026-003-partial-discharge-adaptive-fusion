@@ -1,6 +1,7 @@
-# Use an environment variable; do not hardcode a personal absolute path.
-datasets_catalog_root: ${PD_DATASETS_CATALOG_ROOT}
+# Use an environment variable when data are stored outside the repository.
+# The default runtime location is data/raw.
+raw_data_root: ${PD_RAW_DATA_ROOT:-data/raw}
 
 datasets:
-  vsb: ${PD_DATASETS_CATALOG_ROOT}/data/raw/dataset-vsb-power-line-fault-detection
-  pd_noise: ${PD_DATASETS_CATALOG_ROOT}/data/raw/dataset-pd-noise
+  vsb: ${PD_RAW_DATA_ROOT:-data/raw}/dataset-vsb-power-line-fault-detection
+  pd_noise: ${PD_RAW_DATA_ROOT:-data/raw}/dataset-pd-noise

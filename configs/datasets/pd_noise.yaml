@@ -1,5 +1,5 @@
 dataset_id: engineering-partial-discharge-noise-signals
-catalog_relative_path: data/raw/dataset-pd-noise
+raw_relative_path: dataset-pd-noise
 source: Figshare / Andreas Rauscher et al.
 version: v1
 files:
@@ -22,3 +22,6 @@ review_status:
   license: pending_manual_verification
   matlab_struct_schema: pending_manual_verification
   stator_object_mapping: pending_manual_verification
+runtime_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT

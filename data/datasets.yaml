@@ -1,1 +1,11 @@
-datasets: []
+datasets:
+  - id: "engineering-partial-discharge-noise-signals"
+    version: "v1"
+    role: "partial-discharge and noise signal benchmark"
+    raw_relative_path: "dataset-pd-noise"
+    runtime_source: "local_raw"
+  - id: "engineering-vsb-power-line-fault-detection"
+    version: "2018-kaggle-snapshot"
+    role: "VSB power-line partial-discharge benchmark"
+    raw_relative_path: "dataset-vsb-power-line-fault-detection"
+    runtime_source: "local_raw"
