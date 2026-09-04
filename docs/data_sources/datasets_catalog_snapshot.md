@@ -1,9 +1,12 @@
 # Data-source snapshot
 
-Inspection performed on 2026-08-25. The external catalog is:
+Inspection performed on 2026-08-25. This document records the source/catalog
+snapshot used to stage the portable files. The runtime no longer requires the
+catalog: it reads the manually transferred files from `data/raw` through
+`PD_RAW_DATA_ROOT`.
 
 ```text
-/home/polivares/Dropbox/Work/Research/datasets_catalog/
+data/raw/
 ```
 
 ## VSB Power Line Fault Detection
@@ -35,12 +38,19 @@ along with the README, Figshare metadata, and associated paper. Each signal has
 400 samples. `Te2` is the generalization partition and must not be used for
 hyperparameter selection.
 
-## Open items before scientific coding
+## Confirmatory audit status
 
-- Verify licensing and redistribution terms for both datasets.
-- Document the internal schema of the MATLAB structures.
-- Inspect the VSB Parquet schema.
-- Confirm amplitude units.
-- Confirm how unseen stators/objects are represented in `Te2`.
+The structural audits are now recorded in
+`results/manifests/matlab_audit.json` and `results/manifests/vsb_audit.json`.
+They confirmed the MATLAB `signals`/`labels` structures and 400-sample
+partitions, and the VSB Parquet schema, native 800,000-sample `int8` signals,
+40 MHz sampling metadata and three-phase measurement grouping. The VSB input
+policy is frozen in `results/manifests/vsb_input_policy.json`; it uses the
+native signal without resampling or windows.
 
-Raw data remains outside this repository.
+Remaining non-blocking source-data items are licensing/redistribution review,
+amplitude-unit interpretation and the published description of unseen
+objects in `Te2`. None of these may be resolved using confirmatory test
+results.
+
+Raw data remains outside this repository and is excluded by `.gitignore`.

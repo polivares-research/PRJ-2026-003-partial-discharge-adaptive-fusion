@@ -1,0 +1,48 @@
+{
+  "dataset": {
+    "dataset_id": "engineering-partial-discharge-noise-signals",
+    "version": "v1"
+  },
+  "partitions": {
+    "Te1.mat": {
+      "dtype": "float32",
+      "duplicate_sample_ids": 0,
+      "finite": true,
+      "label_counts": {
+        "0": 234646,
+        "1": 234646
+      },
+      "shape": [
+        469292,
+        400
+      ]
+    },
+    "Tr1.mat": {
+      "dtype": "float32",
+      "duplicate_sample_ids": 0,
+      "finite": true,
+      "label_counts": {
+        "0": 62572,
+        "1": 62572
+      },
+      "shape": [
+        125144,
+        400
+      ]
+    },
+    "Va1.mat": {
+      "dtype": "float32",
+      "duplicate_sample_ids": 0,
+      "finite": true,
+      "label_counts": {
+        "0": 15642,
+        "1": 15642
+      },
+      "shape": [
+        31284,
+        400
+      ]
+    }
+  },
+  "te2_accessed": false
+}

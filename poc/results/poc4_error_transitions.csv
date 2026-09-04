@@ -1,0 +1,11 @@
+seed,comparison,corrected_by_adaptive,introduced_by_adaptive,unchanged,net_error_reduction
+42,Adaptive vs Fixed,222,54,45694,168
+42,Adaptive vs Temporal,620,195,45155,425
+43,Adaptive vs Fixed,58,50,45862,8
+43,Adaptive vs Temporal,358,178,45434,180
+44,Adaptive vs Fixed,699,285,44986,414
+44,Adaptive vs Temporal,891,367,44712,524
+45,Adaptive vs Fixed,185,137,45648,48
+45,Adaptive vs Temporal,747,183,45040,564
+46,Adaptive vs Fixed,47,126,45797,-79
+46,Adaptive vs Temporal,248,98,45624,150

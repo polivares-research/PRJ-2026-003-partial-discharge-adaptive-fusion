@@ -3,7 +3,7 @@
 ## Fuente
 
 ```text
-/home/polivares/Dropbox/Work/Research/PartialDischarges/
+/path/to/legacy/PartialDischarges/
 ```
 
 It must be treated as read-only. Inspection found approximately 7,062 files,

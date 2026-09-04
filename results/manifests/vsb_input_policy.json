@@ -1,0 +1,26 @@
+{
+  "cwt": {
+    "clip_floor": -10.0,
+    "input": "native_signal",
+    "morlet_w0": 6.0,
+    "n_scales": 32,
+    "normalization": "z_score_fit_on_train_only",
+    "scales_max": 64.0,
+    "scales_min": 1.5,
+    "time_bins": 120,
+    "transform": "log_power",
+    "wavelet": "complex_morlet"
+  },
+  "decision_basis": "native Parquet schema and catalog sampling metadata; selected before any model training or holdout evaluation",
+  "duration_seconds": 0.02,
+  "sampling_frequency_hz": 40000000,
+  "signal_length": 800000,
+  "status": "frozen",
+  "temporal": {
+    "input": "native_signal",
+    "normalization": "z_score_fit_on_train_only",
+    "resampling": "none",
+    "window": "none"
+  },
+  "test_results_used": false
+}

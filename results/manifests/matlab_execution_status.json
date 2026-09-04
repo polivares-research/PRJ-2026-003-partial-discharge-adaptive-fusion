@@ -1,0 +1,23 @@
+{
+  "status": "aborted_before_training",
+  "dataset": "engineering-partial-discharge-noise-signals@v1",
+  "seed": 42,
+  "scientific_evidence": false,
+  "reason": "The local execution was intentionally stopped during representation-cache preparation before any expert predictions or checkpoints were written.",
+  "valid_partial_caches": [
+    "Tr1.mat temporal",
+    "Tr1.mat CWT",
+    "Va1.mat temporal",
+    "Va1.mat CWT",
+    "Te1.mat temporal",
+    "Te1.mat CWT"
+  ],
+  "missing_outputs": [
+    "Te2.mat representation caches",
+    "expert_predictions.parquet",
+    "expert_run.json",
+    "fusion outputs",
+    "evaluation summaries"
+  ],
+  "policy": "Ignored caches are local restart artifacts only and must not be reported as results. Regenerate them on the destination server after preflight."
+}

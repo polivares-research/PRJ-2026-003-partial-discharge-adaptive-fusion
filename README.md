@@ -10,21 +10,26 @@ the primary metric, and prepares a future reliability-based adaptive fusion.
 
 ## Datos
 
-Raw datasets are not duplicated in this repository. They are consumed from the
-external catalog through `PD_DATASETS_CATALOG_ROOT`:
+Raw datasets are not duplicated in this repository. On an execution server,
+copy them manually into `data/raw` (or set `PD_RAW_DATA_ROOT`):
 
 ```bash
-export PD_DATASETS_CATALOG_ROOT=/path/to/datasets_catalog
+export PD_RAW_DATA_ROOT="$PWD/data/raw"
 ```
 
-See [data/README.md](data/README.md) and
-[docs/data_sources/datasets_catalog_snapshot.md](docs/data_sources/datasets_catalog_snapshot.md).
+See [data/README.md](data/README.md) and [environment/SETUP-REMOTE.md](environment/SETUP-REMOTE.md).
 
 ## Current status
 
-This stage contains only structure, documentation, configuration, and
-manifests. It does not yet contain experimental code, notebooks, training, or
-files migrated from the legacy repository.
+The confirmatory pipeline is implemented in `src/` and exposed through the
+ordered notebooks under `notebooks/`. The data audits, grouped manifests and
+frozen protocol are recorded under `results/manifests/` and
+`configs/experiments/`. Full neural training has not been accepted from this
+machine because the small local GPU caused instability. The amended batch-4
+protocol is prepared for execution on a larger remote GPU; the original v1
+native VSB temporal case with batch 128 requires substantially more memory.
+See [the GPU budget](docs/reproducibility/gpu_memory_budget.md) and
+[the remote setup guide](environment/SETUP-REMOTE.md).
 
 ## Organization
 
@@ -33,8 +38,15 @@ files migrated from the legacy repository.
 - `docs/`: scientific design, reproducibility, and migration.
 - `paper/`: canonical manuscript and submission materials.
 - `reports/`: metrics, tables, figures, and statistical analysis.
-- `src/`: destination for future scientific code.
+- `src/`: reusable scientific code for adapters, representations, experts, fusion and evaluation.
 - `tests/`: data contracts, unit tests, and integration tests.
+
+The repository does not track raw data, representation caches, checkpoints or
+per-run predictions. Those outputs are ignored by Git and must be regenerated
+on the destination server with the selected frozen configuration. The active
+low-memory variant is `two-dataset-confirmatory-v2-batch4-localraw.yaml`; the
+catalog-backed v2 YAML remains as a historical reference and v1 remains
+available for a larger GPU.
 
 ## Initial scientific rules
 

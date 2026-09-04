@@ -110,6 +110,9 @@ poc/results/**/*.dat
 poc/results/**/*predictions*.csv
 poc/results/**/*predictions*.csv.gz
 poc/results/**/*.zip
+poc/results/pd_adaptive_fusion_*/
+poc/results/poc4_oof_reliability_features.csv.gz
+results/manifests/preflight_*.json
 
 # Generated reports; curated tables/figures may be force-added deliberately
 reports/**/*.html

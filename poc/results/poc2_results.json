@@ -1,0 +1,712 @@
+{
+  "best_epochs": {
+    "cwt": [
+      3,
+      2,
+      2,
+      3,
+      2
+    ],
+    "temporal": [
+      2,
+      7,
+      5,
+      2,
+      5
+    ]
+  },
+  "best_individual_te1": "Temporal",
+  "best_individual_te1_mcc": 0.8484521676551638,
+  "bootstrap": {
+    "comparison": "Conservative gate minus best individual expert",
+    "delta_mcc_95_ci": [
+      0.08219523183641328,
+      0.0844346303785273
+    ],
+    "delta_mcc_point_estimate": 0.08332810852213635,
+    "fraction_delta_mcc_gt_zero": 1.0,
+    "n_bootstrap": 2000,
+    "seed": 20269902
+  },
+  "calibration": {
+    "cwt": {
+      "calibrated_calibration_subset": {
+        "brier": 0.023481910118409575,
+        "ece_10_bins": 0.005298826565038726
+      },
+      "calibrated_holdout_after_fit": {
+        "brier": 0.024635661780912626,
+        "ece_10_bins": 0.005762523093618736
+      },
+      "raw_calibration_subset": {
+        "brier": 0.027371768157701936,
+        "ece_10_bins": 0.044413281658086605
+      },
+      "raw_holdout_after_fit": {
+        "brier": 0.028232916367328633,
+        "ece_10_bins": 0.04278206665155437
+      },
+      "temperature": 0.5358867312681466
+    },
+    "temporal": {
+      "calibrated_calibration_subset": {
+        "brier": 0.024425719314532777,
+        "ece_10_bins": 0.021531786023933658
+      },
+      "calibrated_holdout_after_fit": {
+        "brier": 0.02470086361196018,
+        "ece_10_bins": 0.021692959437624035
+      },
+      "raw_calibration_subset": {
+        "brier": 0.024678760871655773,
+        "ece_10_bins": 0.027726395833326964
+      },
+      "raw_holdout_after_fit": {
+        "brier": 0.025003262934011495,
+        "ece_10_bins": 0.027250102359506142
+      },
+      "temperature": 0.7845840978967508
+    }
+  },
+  "complementarity": {
+    "alternative": "cwt",
+    "anchor": "temporal",
+    "anchor_error_count": 1564,
+    "contingency_table": [
+      {
+        "category": "anchor correct / alternative correct",
+        "count": 58487,
+        "percentage": 95.41731923779692
+      },
+      {
+        "category": "anchor correct / alternative wrong",
+        "count": 1245,
+        "percentage": 2.0311276429130776
+      },
+      {
+        "category": "anchor wrong / alternative correct",
+        "count": 893,
+        "percentage": 1.4568650482902636
+      },
+      {
+        "category": "anchor wrong / alternative wrong",
+        "count": 671,
+        "percentage": 1.094688070999739
+      }
+    ],
+    "disagreement_rate": 0.03487992691203341,
+    "oof_individual_metrics": {
+      "cwt": {
+        "accuracy": 0.9687418428608718,
+        "brier": 0.024404915212937146,
+        "ece_10_bins": 0.005603015755832691,
+        "f1": 0.9685705849545618,
+        "fn": 1125,
+        "fp": 791,
+        "fpr": 0.025809188201513966,
+        "mcc": 0.9375393608293582,
+        "pr_auc": 0.9954574278521499,
+        "precision": 0.9739064458665962,
+        "recall_tpr": 0.9632928739232577,
+        "roc_auc": 0.9948892569034052,
+        "specificity": 0.974190811798486,
+        "threshold": 0.41999999999999993,
+        "tn": 29857,
+        "tp": 29523
+      },
+      "temporal": {
+        "accuracy": 0.9744844688070999,
+        "brier": 0.024645835650230825,
+        "ece_10_bins": 0.02166072528077156,
+        "f1": 0.9742695446170044,
+        "fn": 1038,
+        "fp": 526,
+        "fpr": 0.017162620725659095,
+        "mcc": 0.9491013865766585,
+        "pr_auc": 0.99611189844373,
+        "precision": 0.9825457924077515,
+        "recall_tpr": 0.9661315583398591,
+        "roc_auc": 0.9953107005747123,
+        "specificity": 0.9828373792743409,
+        "threshold": 0.24,
+        "tn": 30122,
+        "tp": 29610
+      }
+    },
+    "oracle_delta_mcc": 0.029078860868565815,
+    "oracle_metrics": {
+      "accuracy": 0.9890531192900026,
+      "fn": 524,
+      "fp": 147,
+      "mcc": 0.9781802474452244,
+      "tn": 30501,
+      "tp": 30124
+    },
+    "recoverable_count": 893,
+    "recoverable_error_fraction": 0.5709718670076727
+  },
+  "configuration": {
+    "batch_size": 256,
+    "bootstrap_seed": 20269902,
+    "cuda_available": true,
+    "cv_max_epochs": 8,
+    "determinism_note": "Seeds set for Python/NumPy/PyTorch/CUDA when available; CPU FFT and library kernels may retain minor nondeterminism.",
+    "device": "cuda",
+    "imbalance_strategy": "BCEWithLogitsLoss(pos_weight=negative_count/positive_count), fold-local; balanced here gives approximately 1.",
+    "inference_batch_size": 2048,
+    "n_bootstrap": 2000,
+    "patience": 2,
+    "seed": 20260901,
+    "torch_threads": 8
+  },
+  "conservative_gate_te1_mcc": 0.9317802761773002,
+  "cwt": {
+    "clip_floor": -10.0,
+    "dtype": "float16",
+    "eps": 1e-08,
+    "morlet_w0": 6.0,
+    "scales": [
+      1.5,
+      1.6930694580078125,
+      1.9109894037246704,
+      2.1569583415985107,
+      2.434587001800537,
+      2.7479498386383057,
+      3.1016464233398438,
+      3.500868558883667,
+      3.9514756202697754,
+      4.460081577301025,
+      5.034152030944824,
+      5.682112693786621,
+      6.413474082946777,
+      7.23897123336792,
+      8.170720100402832,
+      9.222397804260254,
+      10.409440040588379,
+      11.749269485473633,
+      13.261552810668945,
+      14.968486785888672,
+      16.895124435424805,
+      19.069746017456055,
+      21.524269104003906,
+      24.294721603393555,
+      27.42176628112793,
+      30.951303482055664,
+      34.93513488769531,
+      39.431739807128906,
+      44.50711441040039,
+      50.23575973510742,
+      56.701751708984375,
+      64.0
+    ],
+    "shape": [
+      61296,
+      32,
+      120
+    ],
+    "source": "development pool only; Te1 is never cached",
+    "time_bins": 120,
+    "wavelet": "complex Morlet fallback (Morse unavailable in environment)"
+  },
+  "dataset": {
+    "catalog_root_from_environment": "PD_DATASETS_CATALOG_ROOT",
+    "development_counts": {
+      "Te0.mat": {
+        "0": 22985,
+        "1": 22985
+      },
+      "Tr0.mat": {
+        "0": 6130,
+        "1": 6130
+      },
+      "Va0.mat": {
+        "0": 1533,
+        "1": 1533
+      }
+    },
+    "development_pool": [
+      "Tr0.mat",
+      "Va0.mat",
+      "Te0.mat"
+    ],
+    "group_key_available": false,
+    "group_split_limitation": "MAT schema exposes no source physical-observation identifier; StratifiedKFold used.",
+    "id": "engineering-partial-discharge-noise-signals",
+    "locked_test": "Te1.mat",
+    "reserved": [
+      "Te2.mat"
+    ],
+    "te1_count": {
+      "0": 234646,
+      "1": 234646
+    },
+    "version": "v1"
+  },
+  "decision": {
+    "development_gate_delta_mcc": 0.018511657661379743,
+    "failure_diagnosis": "Case D \u2014 gate improves the best individual expert.",
+    "reason": "Conservative fusion improved the locked best individual with a positive paired-bootstrap lower bound and meaningful error reduction.",
+    "relative_error_reduction_vs_best_individual": 0.5650815875922236,
+    "strong_go_rule_used": true,
+    "verdict": "GO"
+  },
+  "delta_mcc_vs_best_individual": 0.08332810852213635,
+  "descriptive_te1_individual_leader": "CWT",
+  "experts": {
+    "cwt": {
+      "architecture": "Conv2D 16 -> 32 -> 64 with BatchNorm/ReLU/Pooling and GlobalAveragePooling",
+      "loss": "BCEWithLogitsLoss",
+      "optimizer": "Adam lr=1e-3 weight_decay=1e-4",
+      "parameters": 23585
+    },
+    "temporal": {
+      "architecture": "TinyTemporalCNN matching PoC-1 small 1D CNN",
+      "loss": "BCEWithLogitsLoss",
+      "optimizer": "Adam lr=1e-3 weight_decay=1e-4",
+      "parameters": 13313
+    }
+  },
+  "final_comparison": [
+    {
+      "Delta vs best individual": 0.0,
+      "MCC": 0.8484521676551638,
+      "Method": "Temporal"
+    },
+    {
+      "Delta vs best individual": 0.09986240683691294,
+      "MCC": 0.9483145744920768,
+      "Method": "CWT"
+    },
+    {
+      "Delta vs best individual": 0.07043060568558024,
+      "MCC": 0.9188827733407441,
+      "Method": "Fixed mean"
+    },
+    {
+      "Delta vs best individual": 0.04605822250884517,
+      "MCC": 0.894510390164009,
+      "Method": "Optimal fixed weight"
+    },
+    {
+      "Delta vs best individual": 0.08283990997539181,
+      "MCC": 0.9312920776305557,
+      "Method": "Entropy adaptive"
+    },
+    {
+      "Delta vs best individual": 0.05854296741111098,
+      "MCC": 0.9069951350662748,
+      "Method": "Logistic stacking"
+    },
+    {
+      "Delta vs best individual": 0.08332810852213635,
+      "MCC": 0.9317802761773002,
+      "Method": "Conservative gate"
+    },
+    {
+      "Delta vs best individual": 0.13314274863792563,
+      "MCC": 0.9815949162930895,
+      "Method": "Oracle"
+    }
+  ],
+  "final_epochs": {
+    "cwt": 2,
+    "temporal": 5
+  },
+  "final_te1_metrics": {
+    "CWT": {
+      "accuracy": 0.9739245501734528,
+      "brier": 0.021483745427770883,
+      "ece_10_bins": 0.018205598347686102,
+      "f1": 0.9735096040403428,
+      "fn": 9794,
+      "fp": 2443,
+      "fpr": 0.010411428279195042,
+      "mcc": 0.9483145744920768,
+      "pr_auc": 0.9971568219287535,
+      "precision": 0.9892518533183748,
+      "recall_tpr": 0.9582605286261006,
+      "roc_auc": 0.9968642934195264,
+      "specificity": 0.9895885717208049,
+      "threshold": 0.41999999999999993,
+      "tn": 232203,
+      "tp": 224852
+    },
+    "Conservative gate": {
+      "accuracy": 0.9655821961593208,
+      "anchor_error_recovery_fraction": 0.5881307555603426,
+      "beneficial_overrides": 21842,
+      "brier": 0.03062061280595138,
+      "disagreement_rate": 0.08679244478917178,
+      "ece_10_bins": 0.023920082940783138,
+      "f1": 0.9631571504256293,
+      "fn": 3811,
+      "fp": 12341,
+      "fpr": 0.046734229434978646,
+      "harmful_overrides": 856,
+      "mcc": 0.9317802761773002,
+      "net_corrections": 20986,
+      "number_overrides": 22698,
+      "override_precision": 0.962287426204952,
+      "pr_auc": 0.9942383333524281,
+      "precision": 0.9541407560125961,
+      "recall_tpr": 0.9723455758887857,
+      "roc_auc": 0.9935508825534967,
+      "specificity": 0.9532657705650214,
+      "threshold": 0.5,
+      "tn": 222305,
+      "tp": 230835
+    },
+    "Entropy adaptive": {
+      "accuracy": 0.9655587565950411,
+      "brier": 0.019178790721084808,
+      "disagreement_rate": 0.08679244478917178,
+      "ece_10_bins": 0.012159434359494807,
+      "f1": 0.9658889697890616,
+      "fn": 5810,
+      "fp": 10353,
+      "fpr": 0.044121783452519964,
+      "mcc": 0.9312920776305557,
+      "pr_auc": 0.9968757076062916,
+      "precision": 0.9567162369506959,
+      "recall_tpr": 0.975239296642602,
+      "roc_auc": 0.9963622043537232,
+      "specificity": 0.9558782165474801,
+      "threshold": 0.30499999999999994,
+      "tn": 224293,
+      "tp": 228836
+    },
+    "Fixed mean": {
+      "accuracy": 0.9591320542434135,
+      "brier": 0.02280786195419356,
+      "ece_10_bins": 0.02828500916332192,
+      "f1": 0.9598682572331927,
+      "fn": 5285,
+      "fp": 13894,
+      "fpr": 0.059212601109756825,
+      "mcc": 0.9188827733407441,
+      "pr_auc": 0.9964589002015937,
+      "precision": 0.9428829828780498,
+      "recall_tpr": 0.9774767095965838,
+      "roc_auc": 0.9958366352214462,
+      "specificity": 0.9407873988902432,
+      "threshold": 0.38499999999999995,
+      "tn": 220752,
+      "tp": 229361
+    },
+    "Logistic stacking": {
+      "accuracy": 0.9529227005787442,
+      "brier": 0.03772402716653018,
+      "disagreement_rate": 0.08679244478917178,
+      "ece_10_bins": 0.035462532601462204,
+      "f1": 0.9540784405834094,
+      "fn": 5141,
+      "fp": 16952,
+      "fpr": 0.07224499884933049,
+      "mcc": 0.9069951350662748,
+      "pr_auc": 0.9959675570962404,
+      "precision": 0.9312172103044345,
+      "recall_tpr": 0.9780904000068188,
+      "roc_auc": 0.995281087382053,
+      "specificity": 0.9277550011506696,
+      "threshold": 0.5549999999999999,
+      "tn": 217694,
+      "tp": 229505
+    },
+    "Optimal fixed weight": {
+      "accuracy": 0.9461699751966792,
+      "brier": 0.027349978100323667,
+      "ece_10_bins": 0.030770423646434588,
+      "f1": 0.9479807589348226,
+      "fn": 4463,
+      "fp": 20799,
+      "fpr": 0.0886399086283167,
+      "mcc": 0.894510390164009,
+      "pr_auc": 0.9956478943349062,
+      "precision": 0.9171295152640428,
+      "recall_tpr": 0.9809798590216752,
+      "roc_auc": 0.9949203737136609,
+      "specificity": 0.9113600913716833,
+      "threshold": 0.33499999999999996,
+      "tn": 213847,
+      "tp": 230183
+    },
+    "Oracle": {
+      "accuracy": 0.9907903821075151,
+      "disagreement_rate": 0.08679244478917178,
+      "fn": 2791,
+      "fp": 1531,
+      "mcc": 0.9815949162930895,
+      "oracle_is_diagnostic_only": true,
+      "tn": 233115,
+      "tp": 231855
+    },
+    "Temporal": {
+      "accuracy": 0.9208637692524058,
+      "brier": 0.04363197307187975,
+      "ece_10_bins": 0.03997553189040309,
+      "f1": 0.9255417261456045,
+      "fn": 3827,
+      "fp": 33311,
+      "fpr": 0.1419627864954016,
+      "mcc": 0.8484521676551638,
+      "pr_auc": 0.9921387473979597,
+      "precision": 0.8738840722371559,
+      "recall_tpr": 0.9836903250002131,
+      "roc_auc": 0.9910338804550175,
+      "specificity": 0.8580372135045984,
+      "threshold": 0.24,
+      "tn": 201335,
+      "tp": 230819
+    }
+  },
+  "folds": [
+    {
+      "best_epoch": 2,
+      "expert": "temporal",
+      "fold_id": 1,
+      "inner_fit_n": 44132,
+      "inner_stop_n": 4904,
+      "oof_n": 12260,
+      "outer_train_n": 49036,
+      "pos_weight": 1.0,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 3,
+      "expert": "cwt",
+      "fold_id": 1,
+      "inner_fit_n": 44132,
+      "inner_stop_n": 4904,
+      "oof_n": 12260,
+      "outer_train_n": 49036,
+      "pos_weight": 1.0,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 7,
+      "expert": "temporal",
+      "fold_id": 2,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 0.9999547004699707,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 2,
+      "expert": "cwt",
+      "fold_id": 2,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 0.9999547004699707,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 5,
+      "expert": "temporal",
+      "fold_id": 3,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 0.9999547004699707,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 2,
+      "expert": "cwt",
+      "fold_id": 3,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 0.9999547004699707,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 2,
+      "expert": "temporal",
+      "fold_id": 4,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 1.0000452995300293,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 3,
+      "expert": "cwt",
+      "fold_id": 4,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 1.0000452995300293,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 5,
+      "expert": "temporal",
+      "fold_id": 5,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 1.0000452995300293,
+      "train_indices_are_group_aware": false
+    },
+    {
+      "best_epoch": 2,
+      "expert": "cwt",
+      "fold_id": 5,
+      "inner_fit_n": 44133,
+      "inner_stop_n": 4904,
+      "oof_n": 12259,
+      "outer_train_n": 49037,
+      "pos_weight": 1.0000452995300293,
+      "train_indices_are_group_aware": false
+    }
+  ],
+  "fusion": {
+    "entropy_threshold": 0.30499999999999994,
+    "fixed_mean_threshold": 0.38499999999999995,
+    "fixed_weight": 0.66,
+    "fixed_weight_threshold": 0.33499999999999996,
+    "gate_features": [
+      "temporal_calibrated_probability",
+      "cwt_calibrated_probability",
+      "temporal_logit",
+      "cwt_logit",
+      "temporal_entropy",
+      "cwt_entropy",
+      "absolute_probability_disagreement",
+      "temporal_distance_to_threshold",
+      "cwt_distance_to_threshold",
+      "rms",
+      "peak_amplitude",
+      "peak_to_peak",
+      "crest_factor",
+      "energy",
+      "signal_std",
+      "kurtosis",
+      "skewness",
+      "robust_noise_estimate"
+    ],
+    "gate_model_candidates": [
+      "logistic",
+      "small_mlp"
+    ],
+    "gate_selection_metrics": {
+      "accuracy": 0.9837683523654159,
+      "fn": 138,
+      "fp": 61,
+      "mcc": 0.9676130442380383,
+      "tn": 6069,
+      "tp": 5992
+    },
+    "gate_selection_override_metrics": {
+      "anchor_error_recovery_fraction": 0.43037974683544306,
+      "beneficial_overrides": 136,
+      "harmful_overrides": 19,
+      "net_corrections": 117,
+      "number_overrides": 155,
+      "override_precision": 0.8774193548387097
+    },
+    "selected_model": "small_mlp",
+    "stacking_features": [
+      "temporal_calibrated_probability",
+      "cwt_calibrated_probability"
+    ],
+    "stacking_threshold": 0.5549999999999999,
+    "tau_override": 0.575,
+    "threshold_sweep_rows": 182
+  },
+  "hypotheses": {
+    "H1_complementarity": true,
+    "H2_recoverability": true,
+    "H3_detectability": true,
+    "H4_conservative_fusion": true
+  },
+  "mcnemar": {
+    "b_baseline_correct_fusion_wrong": 856,
+    "baseline": "Temporal",
+    "c_baseline_wrong_fusion_correct": 21842,
+    "chi_square_with_continuity_correction": 19401.27874702617,
+    "exact_two_sided_p_value": 0.0,
+    "fusion": "Conservative gate"
+  },
+  "objective": "Selective CWT correction of a dominant temporal expert under a conservative disagreement gate.",
+  "oracle_te1_delta_mcc_vs_frozen_anchor": 0.13314274863792563,
+  "override_metrics_te1": {
+    "anchor_error_recovery_fraction": 0.5881307555603426,
+    "beneficial_overrides": 21842,
+    "harmful_overrides": 856,
+    "net_corrections": 20986,
+    "number_overrides": 22698,
+    "override_precision": 0.962287426204952
+  },
+  "poc": "poc2_conservative_cwt_fusion",
+  "protocol": {
+    "inner_training": "10% of each outer training pool held for fold-local early stopping; outer OOF holdout remains untouched.",
+    "meta_split": {
+      "calibration": "20%",
+      "gate_selection": "20%",
+      "gate_training": "60%"
+    },
+    "other_metrics": [
+      "Accuracy",
+      "Precision",
+      "Recall/TPR",
+      "Specificity",
+      "F1",
+      "FPR",
+      "ROC-AUC",
+      "PR-AUC",
+      "Brier",
+      "ECE"
+    ],
+    "outer_cross_fitting": "5-fold StratifiedKFold with 80% outer training and 20% OOF holdout.",
+    "primary_metric": "MCC",
+    "te1_first_loaded_at": "2026-09-01T23:28:56-0400",
+    "te2_loaded": false
+  },
+  "provenance": {
+    "artifacts": [
+      "poc2_results.json",
+      "poc2_oof_predictions.csv",
+      "poc2_te1_predictions.csv",
+      "poc2_bootstrap_deltas.csv",
+      "poc2_cwt_log_float16.dat",
+      "poc2_cwt_cache_meta.json",
+      "poc2_class_distribution.png",
+      "poc2_raw_examples.png",
+      "poc2_cwt_examples.png",
+      "poc2_training_curves.png",
+      "poc2_calibration.png",
+      "poc2_disagreement_analysis.png",
+      "poc2_recoverable_errors.png",
+      "poc2_gate_threshold_sweep.png",
+      "poc2_final_mcc_comparison.png",
+      "poc2_confusion_matrices.png",
+      "poc2_summary.png",
+      "poc2_conclusions.md"
+    ],
+    "dataset_files_sizes": {
+      "Te0.mat": 69235113,
+      "Te1.mat": 706766233,
+      "Tr0.mat": 18465121,
+      "Va0.mat": 4618033
+    },
+    "numpy": "2.4.6",
+    "pandas": "3.0.5",
+    "python": "3.11.16 | packaged by conda-forge | (main, Aug 21 2026, 22:44:51) [GCC 14.4.0]",
+    "repository_commit": "acfe24dd316150c3228a23e30fceafc637d1dcbb",
+    "scipy": "1.17.1",
+    "sklearn": "1.9.0",
+    "torch": "2.9.1"
+  }
+}

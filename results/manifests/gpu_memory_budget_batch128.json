@@ -1,0 +1,354 @@
+{
+  "activation_envelope": "3x sum of traced input/output tensors; heuristic",
+  "batch_size": 128,
+  "cases": [
+    {
+      "all_traced_fp32_tensors_gib": 0.01242828369140625,
+      "batch_size": 128,
+      "case": "matlab_temporal",
+      "expert": "temporal",
+      "input_shape": [
+        128,
+        1,
+        400
+      ],
+      "largest_tensor_gib": 0.0030517578125,
+      "model_payload_plus_three_x_activation_gib": 0.037483230233192444,
+      "parameter_count": 13313,
+      "parameter_gradient_adam_bytes": 213008,
+      "tensor_trace": [
+        {
+          "fp32_gib": 0.00019073486328125,
+          "name": "input",
+          "shape": [
+            128,
+            1,
+            400
+          ]
+        },
+        {
+          "fp32_gib": 0.0030517578125,
+          "name": "conv1",
+          "shape": [
+            128,
+            16,
+            400
+          ]
+        },
+        {
+          "fp32_gib": 0.00152587890625,
+          "name": "pool1",
+          "shape": [
+            128,
+            16,
+            200
+          ]
+        },
+        {
+          "fp32_gib": 0.0030517578125,
+          "name": "conv2",
+          "shape": [
+            128,
+            32,
+            200
+          ]
+        },
+        {
+          "fp32_gib": 0.00152587890625,
+          "name": "pool2",
+          "shape": [
+            128,
+            32,
+            100
+          ]
+        },
+        {
+          "fp32_gib": 0.0030517578125,
+          "name": "conv3",
+          "shape": [
+            128,
+            64,
+            100
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125e-05,
+          "name": "adaptive_avg_pool",
+          "shape": [
+            128,
+            64,
+            1
+          ]
+        }
+      ],
+      "three_x_activation_envelope_gib": 0.03728485107421875
+    },
+    {
+      "all_traced_fp32_tensors_gib": 24.795562744140625,
+      "batch_size": 128,
+      "case": "vsb_temporal_native",
+      "expert": "temporal",
+      "input_shape": [
+        128,
+        1,
+        800000
+      ],
+      "largest_tensor_gib": 6.103515625,
+      "model_payload_plus_three_x_activation_gib": 74.38688661158085,
+      "parameter_count": 13313,
+      "parameter_gradient_adam_bytes": 213008,
+      "tensor_trace": [
+        {
+          "fp32_gib": 0.3814697265625,
+          "name": "input",
+          "shape": [
+            128,
+            1,
+            800000
+          ]
+        },
+        {
+          "fp32_gib": 6.103515625,
+          "name": "conv1",
+          "shape": [
+            128,
+            16,
+            800000
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125,
+          "name": "pool1",
+          "shape": [
+            128,
+            16,
+            400000
+          ]
+        },
+        {
+          "fp32_gib": 6.103515625,
+          "name": "conv2",
+          "shape": [
+            128,
+            32,
+            400000
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125,
+          "name": "pool2",
+          "shape": [
+            128,
+            32,
+            200000
+          ]
+        },
+        {
+          "fp32_gib": 6.103515625,
+          "name": "conv3",
+          "shape": [
+            128,
+            64,
+            200000
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125e-05,
+          "name": "adaptive_avg_pool",
+          "shape": [
+            128,
+            64,
+            1
+          ]
+        }
+      ],
+      "three_x_activation_envelope_gib": 74.38668823242188
+    },
+    {
+      "all_traced_fp32_tensors_gib": 0.064117431640625,
+      "batch_size": 128,
+      "case": "matlab_cwt",
+      "expert": "cwt",
+      "input_shape": [
+        128,
+        1,
+        32,
+        120
+      ],
+      "largest_tensor_gib": 0.029296875,
+      "model_payload_plus_three_x_activation_gib": 0.1927037388086319,
+      "parameter_count": 23585,
+      "parameter_gradient_adam_bytes": 377360,
+      "tensor_trace": [
+        {
+          "fp32_gib": 0.0018310546875,
+          "name": "input",
+          "shape": [
+            128,
+            1,
+            32,
+            120
+          ]
+        },
+        {
+          "fp32_gib": 0.029296875,
+          "name": "conv1",
+          "shape": [
+            128,
+            16,
+            32,
+            120
+          ]
+        },
+        {
+          "fp32_gib": 0.00732421875,
+          "name": "pool1",
+          "shape": [
+            128,
+            16,
+            16,
+            60
+          ]
+        },
+        {
+          "fp32_gib": 0.0146484375,
+          "name": "conv2",
+          "shape": [
+            128,
+            32,
+            16,
+            60
+          ]
+        },
+        {
+          "fp32_gib": 0.003662109375,
+          "name": "pool2",
+          "shape": [
+            128,
+            32,
+            8,
+            30
+          ]
+        },
+        {
+          "fp32_gib": 0.00732421875,
+          "name": "conv3",
+          "shape": [
+            128,
+            64,
+            8,
+            30
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125e-05,
+          "name": "adaptive_avg_pool",
+          "shape": [
+            128,
+            64,
+            1,
+            1
+          ]
+        }
+      ],
+      "three_x_activation_envelope_gib": 0.192352294921875
+    },
+    {
+      "all_traced_fp32_tensors_gib": 0.064117431640625,
+      "batch_size": 128,
+      "case": "vsb_cwt_native_policy",
+      "expert": "cwt",
+      "input_shape": [
+        128,
+        1,
+        32,
+        120
+      ],
+      "largest_tensor_gib": 0.029296875,
+      "model_payload_plus_three_x_activation_gib": 0.1927037388086319,
+      "parameter_count": 23585,
+      "parameter_gradient_adam_bytes": 377360,
+      "tensor_trace": [
+        {
+          "fp32_gib": 0.0018310546875,
+          "name": "input",
+          "shape": [
+            128,
+            1,
+            32,
+            120
+          ]
+        },
+        {
+          "fp32_gib": 0.029296875,
+          "name": "conv1",
+          "shape": [
+            128,
+            16,
+            32,
+            120
+          ]
+        },
+        {
+          "fp32_gib": 0.00732421875,
+          "name": "pool1",
+          "shape": [
+            128,
+            16,
+            16,
+            60
+          ]
+        },
+        {
+          "fp32_gib": 0.0146484375,
+          "name": "conv2",
+          "shape": [
+            128,
+            32,
+            16,
+            60
+          ]
+        },
+        {
+          "fp32_gib": 0.003662109375,
+          "name": "pool2",
+          "shape": [
+            128,
+            32,
+            8,
+            30
+          ]
+        },
+        {
+          "fp32_gib": 0.00732421875,
+          "name": "conv3",
+          "shape": [
+            128,
+            64,
+            8,
+            30
+          ]
+        },
+        {
+          "fp32_gib": 3.0517578125e-05,
+          "name": "adaptive_avg_pool",
+          "shape": [
+            128,
+            64,
+            1,
+            1
+          ]
+        }
+      ],
+      "three_x_activation_envelope_gib": 0.192352294921875
+    }
+  ],
+  "cuda_allocation": false,
+  "cuda_context_and_framework_overhead_included": false,
+  "method": "symbolic_fp32_tensor_budget",
+  "parameter_counts": {
+    "cwt": 23585,
+    "temporal": 13313
+  },
+  "training": false
+}

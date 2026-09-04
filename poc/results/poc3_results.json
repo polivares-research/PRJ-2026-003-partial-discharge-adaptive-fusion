@@ -1,0 +1,262 @@
+{
+  "bootstrap": {
+    "cwt_minus_temporal": {
+      "ci_95": [
+        -0.01808810360307412,
+        -0.0111628204959821
+      ],
+      "comparison": "CWT minus Temporal",
+      "fraction_gt_zero": 0.0,
+      "n_bootstrap": 2000,
+      "point_estimate": -0.014741786653231226
+    },
+    "gate_minus_cwt": {
+      "ci_95": [
+        0.020376887769728073,
+        0.026078781257917523
+      ],
+      "comparison": "Gate minus CWT",
+      "fraction_gt_zero": 1.0,
+      "n_bootstrap": 2000,
+      "point_estimate": 0.023247117560680763
+    },
+    "gate_minus_temporal": {
+      "ci_95": [
+        0.0067525846659748,
+        0.010203008336523087
+      ],
+      "comparison": "Gate minus Temporal",
+      "fraction_gt_zero": 1.0,
+      "n_bootstrap": 2000,
+      "point_estimate": 0.008505330907449538
+    }
+  },
+  "controlled_design": {
+    "batch_size": 128,
+    "gate_training": "five-fold nested OOF predictions on Tr0; model/tau selected on Va0",
+    "loss": "BCEWithLogitsLoss",
+    "max_epochs": 20,
+    "optimizer": "Adam(lr=1e-3, weight_decay=1e-4)",
+    "patience": 5,
+    "seed": 42,
+    "temporal_architecture": "PoC-1 TinyCNN1D, unchanged layers",
+    "temporal_input": "standardized raw signal, 400 samples",
+    "torch_threads": 2
+  },
+  "decision": {
+    "checks": {
+      "cwt_minus_temporal": false,
+      "gate_minus_cwt": true,
+      "gate_minus_temporal": true
+    },
+    "overall_verdict": "REVISE",
+    "reason": "Gate does not improve every individual comparator under the controlled protocol."
+  },
+  "experts": {
+    "cwt": {
+      "best_epoch": 5,
+      "parameters": 23585
+    },
+    "poc1_saved_temporal_te0_metrics": {
+      "accuracy": 0.9743093321731564,
+      "brier": 0.025681342637159092,
+      "ece_10_bins": 0.022903831660952802,
+      "f1": 0.9739816263135864,
+      "fn": 880,
+      "fp": 301,
+      "fpr": 0.013095497063302153,
+      "mcc": 0.9489197822153139,
+      "pr_auc": 0.9964244808791579,
+      "precision": 0.986566098366509,
+      "recall_tpr": 0.961714161409615,
+      "roc_auc": 0.9957729220554079,
+      "specificity": 0.9869045029366978,
+      "threshold": 0.245,
+      "tn": 22684,
+      "tp": 22105
+    },
+    "temporal": {
+      "best_epoch": 9,
+      "parameters": 13313
+    }
+  },
+  "final_te0_metrics": {
+    "CWT": {
+      "accuracy": 0.966956710898412,
+      "brier": 0.024668460025561632,
+      "ece_10_bins": 0.003686157356904909,
+      "f1": 0.9665587918015103,
+      "fn": 1033,
+      "fp": 486,
+      "fpr": 0.02114422449423537,
+      "mcc": 0.9341779955620827,
+      "pr_auc": 0.9956059960884571,
+      "precision": 0.9783403155361441,
+      "recall_tpr": 0.9550576462910594,
+      "roc_auc": 0.9952623517744712,
+      "specificity": 0.9788557755057646,
+      "threshold": 0.5549999999999999,
+      "tn": 22499,
+      "tp": 21952
+    },
+    "Conservative gate": {
+      "accuracy": 0.9785729823798129,
+      "brier": 0.024214923934376898,
+      "ece_10_bins": 0.020046590186039468,
+      "f1": 0.9783111306836948,
+      "fn": 770,
+      "fp": 215,
+      "fpr": 0.009353926473787253,
+      "mcc": 0.9574251131227635,
+      "pr_auc": 0.9961403349421004,
+      "precision": 0.990414623272403,
+      "recall_tpr": 0.9664998912334131,
+      "roc_auc": 0.9955167203133349,
+      "specificity": 0.9906460735262127,
+      "threshold": 0.69,
+      "tn": 22770,
+      "tp": 22215
+    },
+    "Entropy adaptive": {
+      "accuracy": 0.9777028496845769,
+      "brier": 0.018978460280709077,
+      "ece_10_bins": 0.015295584859370036,
+      "f1": 0.9775293214951222,
+      "fn": 690,
+      "fp": 335,
+      "fpr": 0.014574722645203394,
+      "mcc": 0.9555196726969692,
+      "pr_auc": 0.997633650862513,
+      "precision": 0.9851966416261599,
+      "recall_tpr": 0.9699804220143572,
+      "roc_auc": 0.997288144479884,
+      "specificity": 0.9854252773547966,
+      "threshold": 0.26499999999999996,
+      "tn": 22650,
+      "tp": 22295
+    },
+    "Fixed mean": {
+      "accuracy": 0.9760931041983902,
+      "brier": 0.020100380979301117,
+      "ece_10_bins": 0.021010878368409706,
+      "f1": 0.97599126160568,
+      "fn": 647,
+      "fp": 452,
+      "fpr": 0.01966499891233413,
+      "mcc": 0.9522204769320691,
+      "pr_auc": 0.9977287242476583,
+      "precision": 0.980166739798157,
+      "recall_tpr": 0.9718512073091147,
+      "roc_auc": 0.9974300592043245,
+      "specificity": 0.9803350010876659,
+      "threshold": 0.3549999999999999,
+      "tn": 22533,
+      "tp": 22338
+    },
+    "Optimal fixed weight": {
+      "accuracy": 0.9785294757450511,
+      "brier": 0.021975357692954185,
+      "ece_10_bins": 0.026473319525615456,
+      "f1": 0.9783224616195559,
+      "fn": 713,
+      "fp": 274,
+      "fpr": 0.011920817924733523,
+      "mcc": 0.9572335608647975,
+      "pr_auc": 0.997769937655274,
+      "precision": 0.9878470682160916,
+      "recall_tpr": 0.9689797694148358,
+      "roc_auc": 0.9974411189940533,
+      "specificity": 0.9880791820752665,
+      "threshold": 0.285,
+      "tn": 22711,
+      "tp": 22272
+    },
+    "Temporal (PoC-1 matched)": {
+      "accuracy": 0.9743093321731564,
+      "brier": 0.025681342637159092,
+      "ece_10_bins": 0.022903831660952802,
+      "f1": 0.9739816263135864,
+      "fn": 880,
+      "fp": 301,
+      "fpr": 0.013095497063302153,
+      "mcc": 0.9489197822153139,
+      "pr_auc": 0.9964244808791579,
+      "precision": 0.986566098366509,
+      "recall_tpr": 0.961714161409615,
+      "roc_auc": 0.9957729220554079,
+      "specificity": 0.9869045029366978,
+      "threshold": 0.245,
+      "tn": 22684,
+      "tp": 22105
+    }
+  },
+  "mcc_deltas": {
+    "cwt_minus_temporal": -0.014741786653231226,
+    "gate_minus_cwt": 0.023247117560680763,
+    "gate_minus_temporal": 0.008505330907449538
+  },
+  "mcnemar": {
+    "gate_vs_cwt": {
+      "b_baseline_correct_fusion_wrong": 327,
+      "c_baseline_wrong_fusion_correct": 861,
+      "chi_square_with_continuity_correction": 239.13215488215488,
+      "exact_two_sided_p_value": 7.662943705057724e-56
+    },
+    "gate_vs_temporal": {
+      "b_baseline_correct_fusion_wrong": 116,
+      "c_baseline_wrong_fusion_correct": 312,
+      "chi_square_with_continuity_correction": 88.84345794392523,
+      "exact_two_sided_p_value": 7.96340263228165e-22
+    }
+  },
+  "objective": "Controlled isolation of CWT and gate contributions under the PoC-1 split and temporal expert configuration.",
+  "poc": "poc3-controlled-cwt-ablation",
+  "protocol": {
+    "locked_test": "Te0.mat",
+    "te0_loaded_only_after_lock": true,
+    "train": "Tr0.mat",
+    "untouched": [
+      "Te1.mat",
+      "Te2.mat"
+    ],
+    "validation": "Va0.mat"
+  },
+  "provenance": {
+    "artifacts": [
+      "poc3_results.json",
+      "poc3_gate_oof_predictions.csv",
+      "poc3_te0_predictions.csv",
+      "poc3_bootstrap_deltas.csv",
+      "poc3_cwt_tr0_va0_log_float16.dat",
+      "poc3_cwt_tr0_va0_cache_meta.json",
+      "poc3_cwt_te0_log_float16.dat",
+      "poc3_cwt_te0_cache_meta.json",
+      "poc3_cwt_examples.png",
+      "poc3_controlled_mcc.png",
+      "poc3_training_curves.png",
+      "poc3_gate_threshold_sweep.png"
+    ],
+    "catalog_root_from_environment": "PD_DATASETS_CATALOG_ROOT",
+    "dataset_id": "engineering-partial-discharge-noise-signals",
+    "dataset_version": "v1",
+    "numpy": "2.4.6",
+    "pandas": "3.0.5",
+    "python": "3.11.16 | packaged by conda-forge | (main, Aug 21 2026, 22:44:51) [GCC 14.4.0]",
+    "repository_commit": "acfe24dd316150c3228a23e30fceafc637d1dcbb",
+    "te1_or_te2_loaded": false,
+    "torch": "2.9.1"
+  },
+  "selection": {
+    "fixed_weight": 0.78,
+    "gate_model": "small_mlp",
+    "gate_tau": 0.69,
+    "gate_va0_mcc": 0.9578491534063076,
+    "temperature_cwt": 0.5176324619206888,
+    "temperature_temporal": 0.7071067811865475,
+    "threshold_cwt": 0.5549999999999999,
+    "threshold_entropy": 0.26499999999999996,
+    "threshold_fixed_mean": 0.3549999999999999,
+    "threshold_fixed_weight": 0.285,
+    "threshold_temporal": 0.245
+  }
+}

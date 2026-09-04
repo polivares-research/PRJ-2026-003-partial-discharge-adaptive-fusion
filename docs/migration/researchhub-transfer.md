@@ -3,7 +3,7 @@
 This workspace was created from the verified Phase 16 L1 snapshot.
 
 - Source snapshot: portfolio/legacy/migrated/phase16/L1/projects/partial-discharge-adaptive-fusion
-- Original source: /home/polivares/Dropbox/Work/Research/partial-discharge-adaptive-fusion
+- Original source: machine-local legacy path (not committed)
 - Destination: PRJ-2026-003-partial-discharge-adaptive-fusion
 - ResearchHub project: PRJ-2026-003
 - Source idea: none; this is an independent project migration.
