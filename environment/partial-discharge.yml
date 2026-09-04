@@ -1,0 +1,26 @@
+name: partial-discharge
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11.16
+  - pip
+  - numpy=2.4.6
+  - scipy=1.17.1
+  - pandas=3.0.5
+  - scikit-learn=1.9.0
+  - pyarrow=25.0.0
+  - pyyaml=6.0.3
+  - matplotlib=3.11.1
+  - jupyterlab=4.6.3
+  - ipykernel=7.3.0
+  - nbclient=0.11.0
+  - nbformat=5.11.1
+  - pytest=8.*
+  # PyTorch is installed from the CUDA 12.8 wheel index below so that the
+  # environment does not silently resolve a CPU-only conda build.
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.11.0+cu128
+
+# Raw datasets are supplied separately under data/raw on the execution server.
+# No ResearchHub Atlas or researchdata package is required by the runtime.

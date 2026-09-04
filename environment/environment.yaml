@@ -1,5 +1,26 @@
-environment_id: null
-manager: null
-definition_status: "pending"
-profile: "signal-processing"
-portable_spec: null
+environment_id: "ENV-PARTIAL-DISCHARGE-001"
+name: "partial-discharge"
+manager: "mamba"
+python_version: "3.11"
+platform: "linux-x86_64"
+cuda: "12.8"
+key_packages:
+  - "pytorch=2.11.0+cu128"
+  - "cuda-runtime=12.8"
+  - "pyarrow=25.0.0"
+  - "ipykernel=7.3.0"
+confirmatory_requirements:
+  - "repository-local raw data under data/raw; no catalog dependency at runtime"
+  - "pytest (repository validation)"
+runtime_observation_2026_09_03:
+  pyarrow: "installed"
+  runtime_data_source: "local_raw via PD_RAW_DATA_ROOT"
+  cuda_runtime: "available when the host GPU is exposed with elevated permissions"
+  cuda_device_observed: "NVIDIA GeForce RTX 3060 Laptop GPU, 5.68 GiB reported by preflight"
+  pytest: "not installed"
+created_at: "2026-09-01T19:33:22.902821Z"
+updated_at: "2026-09-01T19:33:22.902821Z"
+purpose: "partial-discharge"
+portable_spec: "environment/partial-discharge.yml"
+clone_of: null
+definition_status: "attached"
