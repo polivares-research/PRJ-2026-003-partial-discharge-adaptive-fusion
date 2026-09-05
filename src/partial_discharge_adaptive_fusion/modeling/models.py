@@ -106,11 +106,14 @@ class MultiInstanceExpert(nn.Module):
         sum_probability = torch.zeros(batch_size, device=x.device, dtype=torch.float32)
         sum_square = torch.zeros_like(sum_probability)
         high_confidence = torch.zeros_like(sum_probability)
+        single_window_logit: torch.Tensor | None = None
         seen = 0
         for start in range(0, n_windows, self.instance_microbatch_size):
             stop = min(start + self.instance_microbatch_size, n_windows)
             chunk = x[:, start:stop].reshape(batch_size * (stop - start), *x.shape[2:])
             logits = self.encoder(chunk).reshape(batch_size, stop - start)
+            if n_windows == 1:
+                single_window_logit = logits[:, 0]
             probabilities = torch.sigmoid(logits)
             detached = probabilities.detach()
             summary_chunks.append(detached)
@@ -123,7 +126,11 @@ class MultiInstanceExpert(nn.Module):
         if selected is None:
             raise RuntimeError("No window predictions were produced")
         aggregated = selected.mean(dim=1)
-        bag_logit = torch.logit(torch.clamp(aggregated, 1e-6, 1.0 - 1e-6))
+        bag_logit = (
+            single_window_logit
+            if single_window_logit is not None
+            else torch.logit(torch.clamp(aggregated, 1e-6, 1.0 - 1e-6))
+        )
         if not return_window_summary:
             return bag_logit
         all_probabilities = torch.cat(summary_chunks, dim=1)
