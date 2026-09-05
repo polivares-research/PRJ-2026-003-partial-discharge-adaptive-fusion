@@ -1,0 +1,35 @@
+{
+  "commands": [
+    {
+      "command": [
+        "/data/envs/polivares/atlas-micromamba/envs/partial-discharge/bin/python",
+        "scripts/run_representation_aware_experts.py",
+        "--dataset",
+        "both",
+        "--config",
+        "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml",
+        "--raw-root",
+        "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/data/raw",
+        "--io-batch-size",
+        "4"
+      ],
+      "returncode": 0
+    },
+    {
+      "command": [
+        "/data/envs/polivares/atlas-micromamba/envs/partial-discharge/bin/python",
+        "scripts/run_representation_aware_fusion.py",
+        "--dataset",
+        "both",
+        "--config",
+        "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml"
+      ],
+      "returncode": 0
+    }
+  ],
+  "config": "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml",
+  "dataset": "both",
+  "notebook_execution_requested": false,
+  "raw_root_environment_variable": "PD_RAW_DATA_ROOT",
+  "started_at_utc": "2026-09-05T17:26:33.256094+00:00"
+}
