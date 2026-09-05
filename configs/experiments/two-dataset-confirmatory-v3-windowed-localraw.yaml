@@ -1,0 +1,332 @@
+config_version: two-dataset-confirmatory-v3-windowed-localraw
+parent_config_version: two-dataset-vsb-window-selection-localraw-v1
+protocol_status: frozen
+objective: Select a representation-aware VSB window protocol using development data
+  and seed 42 before any confirmatory evaluation.
+data_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+datasets:
+  engineering-partial-discharge-noise-signals:
+    version: v1
+    role: matlab_pd_noise
+    local_directory: dataset-pd-noise
+    train: Tr1.mat
+    validation: Va1.mat
+    secondary_test: Te1.mat
+    confirmatory_test: Te2.mat
+    input_policy:
+      status: frozen
+      temporal: standardized_400_sample_signal
+      cwt: morlet_log_power_32_scales_120_time_bins
+      multi_instance:
+        window_length: 400
+        stride: 400
+        n_windows: 1
+        aggregation: max
+        loss_unit: parent_signal
+    grouping: source_partitions; no per-sample group ID is available
+  engineering-vsb-power-line-fault-detection:
+    version: 2018-kaggle-snapshot
+    role: vsb_pd
+    local_directory: dataset-vsb-power-line-fault-detection
+    labeled_source: train.parquet + metadata_train.csv
+    official_test: excluded_from_scientific_metrics_because_unlabeled
+    input_policy:
+      status: frozen
+      decision_basis: development_only_seed_42_selection
+      selected_candidate: B_4096_max
+      temporal:
+        input: signal_windows
+        signal_length: 800000
+        sampling_frequency_hz: 40000000.0
+        window_length: 4096
+        stride: 4096
+        window_count: 196
+        window_duration_seconds: 0.0001024
+        padding: none
+        normalization: z_score_fit_on_train_only
+        aggregation: max
+        top_k_fraction: 0.1
+        top_k: 1
+      cwt:
+        input: signal_windows
+        signal_length: 800000
+        sampling_frequency_hz: 40000000.0
+        window_length: 4096
+        stride: 4096
+        window_count: 196
+        window_duration_seconds: 0.0001024
+        padding: none
+        normalization: z_score_fit_on_train_only
+        aggregation: max
+        top_k_fraction: 0.1
+        top_k: 1
+        wavelet: complex_morlet
+        morlet_w0: 6.0
+        n_scales: 32
+        scales_min: 1.5
+        scales_max: 64.0
+        scales:
+        - 1.5
+        - 1.69306942146417
+        - 1.910989377264679
+        - 2.1569584529264563
+        - 2.434586933345631
+        - 2.747949793829143
+        - 3.101646511767261
+        - 3.500868576842771
+        - 3.9514756906781883
+        - 4.460081774364167
+        - 5.034152046270419
+        - 5.682112595027817
+        - 6.413474055972013
+        - 7.238971206346666
+        - 8.170720528216755
+        - 9.222398051768906
+        - 10.409440089347113
+        - 11.749269806557901
+        - 13.261552956010283
+        - 14.968486527299188
+        - 16.895124549979098
+        - 19.069745831598812
+        - 21.5242690283825
+        - 24.294721140881816
+        - 27.42176631108406
+        - 30.951302682555184
+        - 34.935136084210725
+        - 39.43174042591115
+        - 44.50711596681512
+        - 50.235758053982956
+        - 56.70175055018059
+        - 64.0
+        time_bins: 120
+        transform: log_power
+        clip_floor: -10.0
+        pseudo_frequency_range_hz:
+        - 596831.0365946075
+        - 25464790.894703254
+      test_results_used: false
+      preprocessing_version: representation-aware-mi-v1
+    grouping: id_measurement
+    outer_split: StratifiedGroupKFold, five folds; folds 0/1/2-4 = test/validation/train
+splits:
+  split_seed: 42
+  oof_folds: 5
+  preserve_source_matlab_partitions: true
+  vsb_group_column: id_measurement
+  vsb_target_holdout_approximation: 60_percent_train_20_percent_validation_20_percent_test
+seeds:
+- 42
+- 43
+- 44
+- 45
+- 46
+experts:
+  temporal:
+    architecture: TinyTemporalCNN
+    channels:
+    - 16
+    - 32
+    - 64
+    kernels:
+    - 7
+    - 5
+    - 5
+    optimizer: Adam
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    loss: BCEWithLogitsLoss
+  cwt:
+    architecture: SmallCWT2DCNN
+    channels:
+    - 16
+    - 32
+    - 64
+    kernels:
+    - - 3
+      - 3
+    - - 3
+      - 3
+    - - 3
+      - 3
+    optimizer: Adam
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    loss: BCEWithLogitsLoss
+  epochs:
+    temporal: 9
+    cwt: 5
+  batch_size: 4
+  inference_batch_size: 4
+  gradient_accumulation_steps: 1
+  instance_microbatch_size: 32
+  imbalance:
+    matlab: none_balanced_partitions
+    vsb: fold_local_pos_weight
+fusion:
+  fixed_weight_grid: 0.0_to_1.0_step_0.05
+  threshold_grid: 0.05_to_0.95_step_0.005
+  reliability_models:
+  - logistic
+  - hist_gradient_boosting
+  - small_mlp
+  reliability_selection: validation_brier_then_roc_auc
+  conservative_delta_grid:
+  - 0.0
+  - 0.02
+  - 0.05
+  - 0.1
+  - 0.15
+  - 0.2
+  - 0.25
+  reliability_weight_formula: r_i_divided_by_sum_reliability_plus_epsilon
+evaluation:
+  primary_metric: MCC
+  secondary_metrics:
+  - accuracy
+  - precision
+  - recall_pd
+  - specificity
+  - f1
+  - pr_auc
+  - roc_auc
+  - brier
+  - ece
+  paired_bootstrap_iterations_per_seed: 10000
+  mcnemar: exact_two_sided
+  adaptive_target_delta_mcc: 0.005
+protection:
+  cuda_required_for_training: true
+  cpu_fallback: forbidden
+  te2_before_protocol_freeze: forbidden
+  test_tuning: forbidden
+selection:
+  selection_seed: 42
+  allowed_split: train_and_validation_only
+  blocked_splits:
+  - test
+  - test_confirmatory
+  - official_unlabeled_test
+  tie_tolerance_mcc: 0.005
+  candidates:
+  - id: A_historical_native
+    status: historical_diagnostic_only
+    window_length: 800000
+    stride: null
+    aggregation: native_pipeline
+  - id: B_4096_max
+    window_length: 4096
+    stride: 4096
+    aggregation: max
+    top_k_fraction: 0.1
+  - id: C_8192_top10_mean
+    window_length: 8192
+    stride: 4096
+    aggregation: top_k_mean
+    top_k_fraction: 0.1
+  - id: D_16384_top10_mean
+    window_length: 16384
+    stride: 8192
+    aggregation: top_k_mean
+    top_k_fraction: 0.1
+  selection_rule:
+  - highest_mean_mcc_of_two_experts_on_development
+  - within_0.005_choose_highest_minimum_expert_mcc
+  - remaining_tie_choose_lowest_storage_compute_cost
+outputs:
+  results_root: results/runs/v3-windowed
+  manifest_root: results/manifests
+  reports_root: reports
+  predictions_format: parquet
+  summaries_format: csv_json_yaml
+environment: partial-discharge
+device_policy: cuda_required
+runtime_config_version: confirmatory-localraw-windowed-v3
+selection_record:
+  selection_manifest: results/manifests/vsb_representation_selection.json
+  selected_candidate: B_4096_max
+  selection_seed: 42
+  holdout_opened: false
+freeze_record:
+  frozen_at_utc: '2026-09-05T09:06:14.437890+00:00'
+  audit_record_summary:
+    dataset:
+      dataset_id: engineering-vsb-power-line-fault-detection
+      dataset_version: 2018-kaggle-snapshot
+    metadata_audit:
+      n_signals: 8712
+      n_measurements: 2904
+      phase_values:
+      - '0'
+      - '1'
+      - '2'
+      groups_with_three_distinct_phases: 2904
+      groups_with_unexpected_phase_count: 0
+      groups_with_unexpected_row_count: 0
+      label_counts:
+        '0': 8187
+        '1': 525
+      groups_with_mixed_labels: 38
+      mixed_label_groups:
+      - '1068'
+      - '1076'
+      - '1091'
+      - '1132'
+      - '1256'
+      - '126'
+      - '1268'
+      - '1277'
+      - '1304'
+      - '1420'
+      - '1537'
+      - '1561'
+      - '159'
+      - '1668'
+      - '1704'
+      - '1884'
+      - '1899'
+      - '1994'
+      - '2328'
+      - '2623'
+      - '2693'
+      - '271'
+      - '2753'
+      - '2760'
+      - '2807'
+      - '2876'
+      - '301'
+      - '443'
+      - '518'
+      - '601'
+      - '608'
+      - '620'
+      - '67'
+      - '706'
+      - '894'
+      - '944'
+      - '96'
+      - '988'
+    native_signal_sample:
+      native_signal_audit_completed: true
+      sample_signal_ids:
+      - '0'
+      - '1'
+      - '2'
+      sample_shape:
+      - 3
+      - 800000
+      native_length: 800000
+      finite: true
+      minimum: -39.0
+      maximum: 39.0
+      mean: -0.39931708574295044
+      std: 13.541378021240234
+      sampling_frequency_hz: 40000000.0
+      duration_seconds: 0.02
+      input_policy_decision: unresolved
+    parquet_schema_summary:
+      num_rows: 800000
+      num_columns: 8712
+      num_row_groups: 1
