@@ -67,3 +67,14 @@ different amendment and are not silently applied.
 The interrupted local run produced no expert predictions or checkpoints. Its
 partial representation caches are ignored by Git and are not scientific
 results.
+
+## Windowed VSB budget
+
+The representation-aware runner reduces the CNN input from one 800,000-sample
+sequence to bounded windows and processes windows in instance micro-batches.
+The expected storage envelope is approximately 28–56 GB for temporal caches
+and 6–13 GB for CWT caches, depending on the selected candidate and cache
+dtype. Caches are created sequentially and must remain outside Git. The
+physical neural batch remains the frozen batch-4 amendment; the instance
+micro-batch is a memory-control parameter inside one parent-signal forward
+pass and does not change the statistical unit.

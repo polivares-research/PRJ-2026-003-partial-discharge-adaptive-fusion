@@ -1,4 +1,7 @@
 {
+  "interpretation_status": "historical_diagnostic_only",
+  "scientific_interpretation": "INVALID FOR FINAL SCIENTIFIC INTERPRETATION DUE TO INPUT-REPRESENTATION MISMATCH",
+  "superseded_by": "two-dataset-confirmatory-v3-windowed-localraw",
   "cwt": {
     "clip_floor": -10.0,
     "input": "native_signal",

@@ -2,14 +2,14 @@
 
 The confirmatory stage has two deliberately different states:
 
-* a draft protocol, in which the VSB native signal audit is still allowed to
-  determine whether an input policy can be defended; and
+* a draft/development-selection protocol, in which the VSB native signal audit
+  and predeclared window candidates determine the revised input policy; and
 * a frozen protocol, in which all preprocessing and evaluation decisions are
   locked before opening MATLAB ``Te2`` or the VSB holdout.
 
-This module contains the state transition but does not decide a VSB signal
-length, resampling policy, or window.  Those values must be supplied by the
-data-audit stage and recorded in the resulting YAML.
+This module contains the state transition and guards. The selector supplies
+the VSB window values and records them in the resulting YAML; this module never
+infers them from confirmatory outcomes.
 """
 
 from __future__ import annotations
@@ -104,6 +104,20 @@ def assert_protocol_frozen(config: dict[str, Any]) -> None:
     require_frozen_input_policy(config, MATLAB_DATASET_ID)
     if config["protection"].get("te2_before_protocol_freeze") != "forbidden":
         raise ConfigurationError("Te2 protection is missing from the frozen configuration.")
+
+
+def assert_development_selection_ready(config: dict[str, Any]) -> None:
+    """Allow candidate selection while protecting every confirmatory holdout."""
+
+    validate_experiment_config(config)
+    if config.get("protocol_status") not in {"development_selection", "draft"}:
+        raise ConfigurationError("Window selection requires a draft/development-selection configuration.")
+    if config["protection"].get("test_tuning") is not True and config["protection"].get("test_tuning") != "forbidden":
+        raise ConfigurationError("Test tuning protection must remain explicit during selection.")
+    if config.get("datasets", {}).get(MATLAB_DATASET_ID, {}).get("confirmatory_test") != "Te2.mat":
+        raise ConfigurationError("MATLAB Te2 is not explicitly protected in the selection protocol.")
+    if config.get("datasets", {}).get(VSB_DATASET_ID, {}).get("official_test") is None:
+        raise ConfigurationError("The unlabeled VSB official test must remain excluded.")
 
 
 def freeze_protocol(

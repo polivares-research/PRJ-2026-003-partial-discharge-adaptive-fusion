@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from .config import InfrastructureError, require_cuda
-from .protocol import MATLAB_DATASET_ID, VSB_DATASET_ID, assert_protocol_frozen, load_experiment_config
+from .protocol import (
+    MATLAB_DATASET_ID, VSB_DATASET_ID, assert_development_selection_ready,
+    assert_protocol_frozen, load_experiment_config,
+)
 
 
 def git_commit() -> str | None:
@@ -64,4 +67,15 @@ def require_training_ready(config_path: str | Path, *, dataset_id: str, confirma
         require_cuda()
     except InfrastructureError:
         raise
+    return config
+
+
+def require_development_ready(config_path: str | Path, *, dataset_id: str) -> dict[str, Any]:
+    """Gate representation selection to development data and CUDA only."""
+
+    config = load_experiment_config(config_path)
+    assert_development_selection_ready(config)
+    if dataset_id not in (MATLAB_DATASET_ID, VSB_DATASET_ID):
+        raise ValueError(f"Unknown confirmatory dataset: {dataset_id}")
+    require_cuda()
     return config

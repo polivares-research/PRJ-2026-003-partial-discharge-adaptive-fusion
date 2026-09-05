@@ -35,7 +35,7 @@ fallback.
 
 ## Frozen protocol and execution
 
-The active configuration is
+The historical native configuration is
 `configs/experiments/two-dataset-confirmatory-v2-batch4-localraw.yaml`.
 It fixes physical batch 4, inference batch 4, and gradient accumulation 1 for
 both experts and both datasets. The original catalog-backed v1/v2 YAML files
@@ -69,3 +69,29 @@ Each result records configuration version, data source, dataset/version,
 split, seed, imbalance strategy, runtime information, file metadata where
 available, and Git commit. Raw data, caches, predictions, and checkpoints are
 ignored by Git.
+
+## Revised windowed execution
+
+The v2 native VSB results are historical and must not be used for the final
+scientific claim. First run the development-only selector:
+
+```bash
+export PD_RAW_DATA_ROOT="$PWD/data/raw"
+MAMBA_ROOT_PREFIX=/data/envs/polivares/atlas-micromamba \
+  micromamba run -n partial-discharge \
+  python scripts/select_vsb_window_protocol.py
+```
+
+Then use the generated frozen v3 YAML:
+
+```bash
+python scripts/run_representation_aware_experts.py --dataset both \
+  --config configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml
+python scripts/run_representation_aware_fusion.py \
+  --config configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml
+```
+
+The v3 runner uses `data/raw`/`PD_RAW_DATA_ROOT`, the `partial-discharge`
+environment and CUDA. Its VSB cache is a bag per parent signal, while metrics
+are calculated once per original signal. No data under `data/` or any cache is
+to be committed.

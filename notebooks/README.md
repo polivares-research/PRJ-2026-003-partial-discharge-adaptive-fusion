@@ -12,9 +12,10 @@ results notebooks under `01-data/` through `05-results/`. They call reusable
 code from `src/`; they do not contain the scientific implementation or hidden
 dataset paths.
 
-The active execution path is the frozen
-`configs/experiments/two-dataset-confirmatory-v2-batch4-localraw.yaml`
-configuration. The expert notebooks are dry wrappers by default and require
+The active execution path is the frozen, generated
+`configs/experiments/two-dataset-confirmatory-v3-windowed-localraw.yaml`
+configuration. Run the development-only window selector before opening this
+file. The expert notebooks are dry wrappers by default and require
 the `partial-discharge` kernel, `PD_RAW_DATA_ROOT` (default `data/raw`), CUDA
 and `PD_RUN_EXPERIMENT=1` to launch training. The original v1 batch-128 path
-and catalog-backed v2 YAML are kept separately as historical references.
+and native VSB v2 YAML/results are kept separately as historical references.

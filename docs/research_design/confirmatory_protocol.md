@@ -53,12 +53,11 @@ train subset. The exact row assignment is saved as a split manifest.
 
 The draft configuration keeps the VSB signal-to-input mapping unresolved until
 the Parquet schema and native signal representation are inspected. That audit
-has now confirmed an `800000`-sample `int8` native signal, three phases per
-measurement, and catalog sampling metadata of 40 MHz over 20 ms. The frozen
-configuration therefore uses the native signal without resampling or windows;
-normalization remains train-only and the inherited Morlet/log-power CWT uses
-32 scales and 120 time bins. This decision was recorded before any model
-training or holdout evaluation.
+confirmed an `800000`-sample `int8` native signal, three phases per
+measurement, and 40 MHz over 20 ms. The resulting v2 native mapping is retained
+as a historical diagnostic. The active v3 protocol selects end-aligned windows
+on development data only; normalization remains train-only and the inherited
+Morlet/log-power CWT uses 32 scales and 120 time bins.
 
 ## Experts and fusion
 
@@ -116,3 +115,14 @@ All neural-network stages require CUDA. The runner must record Python,
 PyTorch, CUDA, GPU, package versions and repository commit, and must stop
 before model construction if CUDA is unavailable. The CPU fallback is
 forbidden.
+
+## Representation-aware revision
+
+The native VSB policy and its outputs are historical diagnostics only because
+an 800,000-sample signal was passed to the small CNN as one globally pooled
+input. The active revision is specified in
+[`representation_aware_revision.md`](representation_aware_revision.md). It
+uses a shared-encoder multi-instance bag: MATLAB has one 400-sample window;
+VSB has predeclared, end-aligned windows with max or top-10%-mean pooling.
+Selection uses seed 42 and development train/validation data only, then writes
+the frozen v3 configuration before opening any confirmatory holdout.

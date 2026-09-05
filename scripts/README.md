@@ -21,13 +21,13 @@ execution:
 python scripts/execute_confirmatory_v2_notebooks.py
 ```
 
-The active configuration is
+The historical native configuration is
 `configs/experiments/two-dataset-confirmatory-v2-batch4-localraw.yaml`.
 Both expert scripts use physical batch 4, inference batch 4, and gradient
 accumulation 1. The VSB `--io-batch-size` only bounds Parquet reading and does
 not alter the neural batch.
 
-Equivalent direct expert commands are:
+Equivalent direct historical expert commands are:
 
 ```bash
 python scripts/run_matlab_experts.py \
@@ -39,6 +39,24 @@ python scripts/run_vsb_experts.py \
 
 Training requires visible CUDA and is blocked on CPU. Expert execution should
 only start after the audit-only preflight and non-training VRAM estimate pass.
+
+## Representation-aware VSB revision
+
+The native VSB v2 outputs are historical diagnostics and are not valid for the
+final scientific interpretation. The current workflow is:
+
+```bash
+export PYTHONPATH="$PWD/src"
+export PD_RAW_DATA_ROOT="$PWD/data/raw"
+MAMBA_ROOT_PREFIX=/data/envs/polivares/atlas-micromamba \
+  micromamba run -n partial-discharge \
+  python scripts/execute_representation_aware_pipeline.py
+```
+
+This executes development-only candidate selection first, freezes the v3 YAML,
+then runs the five-seed multi-instance experts and signal-level fusion. To
+resume after selection, use `--skip-selection`. The candidate selector never
+opens MATLAB `Te2` or the VSB grouped holdout.
 
 ## Optional source-machine staging
 

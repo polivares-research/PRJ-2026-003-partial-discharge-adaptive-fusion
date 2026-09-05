@@ -6,6 +6,7 @@ from partial_discharge_adaptive_fusion.config import ConfigurationError
 from partial_discharge_adaptive_fusion.protocol import (
     MATLAB_DATASET_ID,
     VSB_DATASET_ID,
+    assert_development_selection_ready,
     assert_protocol_frozen,
     load_experiment_config,
 )
@@ -34,3 +35,9 @@ def test_batch4_amendment_is_frozen_and_explicit():
         "root_environment_variable": "PD_RAW_DATA_ROOT",
         "default_relative_root": "data/raw",
     }
+
+
+def test_window_selection_protocol_blocks_confirmatory_data():
+    config = load_experiment_config(Path("configs/experiments/two-dataset-vsb-window-selection-localraw.yaml"))
+    assert_development_selection_ready(config)
+    assert config["selection"]["blocked_splits"] == ["test", "test_confirmatory", "official_unlabeled_test"]
