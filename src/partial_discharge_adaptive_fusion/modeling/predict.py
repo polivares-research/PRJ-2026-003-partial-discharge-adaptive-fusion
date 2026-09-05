@@ -22,7 +22,7 @@ def logits_for_array(model: nn.Module, values: np.ndarray, *, batch_size: int = 
     model.eval()
     output = []
     with torch.inference_mode():
-        for (batch,) in loader:
+        for batch in loader:
             output.append(model(batch.to(device, non_blocking=True)).detach().cpu().numpy())
     return np.concatenate(output).astype(np.float64)
 
