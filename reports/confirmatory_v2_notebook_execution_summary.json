@@ -1,0 +1,104 @@
+{
+  "config_version": "two-dataset-confirmatory-v2-batch4-localraw",
+  "environment": "partial-discharge",
+  "execution_mode": "in_place_with_cell_outputs",
+  "generated_at_utc": "2026-09-05T00:01:37.219368+00:00",
+  "notebooks": [
+    {
+      "duration_seconds": 1.399,
+      "errors": [],
+      "notebook": "notebooks/00-infrastructure/0.0-por-gpu-memory-budget.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 1.83,
+      "errors": [],
+      "notebook": "notebooks/01-data/1.0-por-dataset-inventory.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 6.047,
+      "errors": [],
+      "notebook": "notebooks/01-data/1.1-por-matlab-data-audit.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 1.685,
+      "errors": [],
+      "notebook": "notebooks/01-data/1.2-por-vsb-data-audit.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.55,
+      "errors": [],
+      "notebook": "notebooks/01-data/1.3-por-experimental-protocol.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 10430.411,
+      "errors": [],
+      "notebook": "notebooks/02-experts/2.0-por-matlab-experts.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 9929.889,
+      "errors": [],
+      "notebook": "notebooks/02-experts/2.1-por-vsb-experts.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.576,
+      "errors": [],
+      "notebook": "notebooks/02-experts/2.2-por-expert-complementarity.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 3.778,
+      "errors": [],
+      "notebook": "notebooks/03-fusion/3.0-por-static-fusion.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.568,
+      "errors": [],
+      "notebook": "notebooks/03-fusion/3.1-por-reliability-aware-fusion.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.58,
+      "errors": [],
+      "notebook": "notebooks/03-fusion/3.2-por-conservative-adaptive-fusion.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.529,
+      "errors": [],
+      "notebook": "notebooks/04-evaluation/4.0-por-multiseed-evaluation.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.591,
+      "errors": [],
+      "notebook": "notebooks/04-evaluation/4.1-por-statistical-analysis.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.532,
+      "errors": [],
+      "notebook": "notebooks/04-evaluation/4.2-por-cross-dataset-analysis.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.556,
+      "errors": [],
+      "notebook": "notebooks/05-results/5.0-por-final-results.ipynb",
+      "status": "passed"
+    },
+    {
+      "duration_seconds": 0.851,
+      "errors": [],
+      "notebook": "notebooks/05-results/5.1-por-publication-figures.ipynb",
+      "status": "passed"
+    }
+  ]
+}
