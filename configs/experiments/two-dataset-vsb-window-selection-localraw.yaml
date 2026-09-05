@@ -57,7 +57,7 @@ experts:
     loss: BCEWithLogitsLoss
   cwt:
     architecture: SmallCWT2DCNN
-    channels: [[16, 32, 64]]
+    channels: [16, 32, 64]
     kernels: [[3, 3], [3, 3], [3, 3]]
     optimizer: Adam
     learning_rate: 0.001
