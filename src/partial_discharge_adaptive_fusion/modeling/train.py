@@ -12,8 +12,8 @@ from torch import nn
 from torch.utils.data import DataLoader
 
 from ..config import require_cuda
-from .data import NumpyDataset
-from .models import make_expert
+from .data import MultiInstanceDataset, NumpyDataset
+from .models import make_expert, make_multi_instance_expert
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class CrossFitResult:
     logits: np.ndarray
     folds: np.ndarray
     histories: dict[int, list[dict[str, float]]]
+    window_summaries: dict[str, np.ndarray] | None = None
 
 
 def set_seed(seed: int) -> None:
@@ -60,6 +61,10 @@ def train_expert(
     validation_indices: np.ndarray | None = None,
     validation_batch_size: int | None = None,
     gradient_accumulation_steps: int = 1,
+    multi_instance: bool = False,
+    aggregation: str = "top_k_mean",
+    top_k_fraction: float = 0.10,
+    instance_microbatch_size: int = 32,
 ) -> TrainingResult:
     """Train one expert on CUDA and select the epoch using validation MCC."""
 
@@ -71,9 +76,18 @@ def train_expert(
     if gradient_accumulation_steps < 1:
         raise ValueError("Gradient accumulation steps must be positive.")
     set_seed(seed)
-    model = make_expert(kind).to(device)
-    train_dataset = NumpyDataset(train_x, train_y, train_indices)
-    validation_dataset = NumpyDataset(validation_x, validation_y, validation_indices)
+    model = (
+        make_multi_instance_expert(
+            kind,
+            aggregation=aggregation,
+            top_k_fraction=top_k_fraction,
+            instance_microbatch_size=instance_microbatch_size,
+        )
+        if multi_instance else make_expert(kind)
+    ).to(device)
+    dataset_class = MultiInstanceDataset if multi_instance else NumpyDataset
+    train_dataset = dataset_class(train_x, train_y, train_indices)
+    validation_dataset = dataset_class(validation_x, validation_y, validation_indices)
     selection_labels = (
         np.asarray(validation_y) if validation_indices is None
         else np.asarray(validation_y)[np.asarray(validation_indices, dtype=np.int64)]
@@ -182,6 +196,10 @@ def cross_fitted_logits(
     inner_splits: int = 5,
     validation_batch_size: int | None = None,
     gradient_accumulation_steps: int = 1,
+    multi_instance: bool = False,
+    aggregation: str = "top_k_mean",
+    top_k_fraction: float = 0.10,
+    instance_microbatch_size: int = 32,
 ) -> CrossFitResult:
     """Generate leakage-safe OOF logits with fold-local validation.
 
@@ -208,6 +226,7 @@ def cross_fitted_logits(
             raise ValueError("Groups must have the same number of samples as labels.")
     logits = np.full(len(labels), np.nan, dtype=np.float64)
     histories: dict[int, list[dict[str, float]]] = {}
+    window_summaries: dict[str, np.ndarray] = {}
     prediction_batch_size = validation_batch_size or max(batch_size, 512)
     for fold in unique_folds:
         holdout = np.flatnonzero(folds == fold)
@@ -233,18 +252,36 @@ def cross_fitted_logits(
             train_indices=inner_train, validation_indices=inner_validation,
             validation_batch_size=validation_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
+            multi_instance=multi_instance,
+            aggregation=aggregation,
+            top_k_fraction=top_k_fraction,
+            instance_microbatch_size=instance_microbatch_size,
         )
-        from .predict import logits_for_indices
+        if multi_instance:
+            from .predict import logits_and_window_summaries_for_indices
 
-        logits[holdout] = logits_for_indices(
-            result.model, inputs, holdout, batch_size=prediction_batch_size,
-        )
+            fold_logits, fold_summaries = logits_and_window_summaries_for_indices(
+                result.model, inputs, holdout, batch_size=prediction_batch_size,
+            )
+            for name, values in fold_summaries.items():
+                window_summaries.setdefault(name, np.full(len(labels), np.nan, dtype=np.float64))
+                window_summaries[name][holdout] = values
+        else:
+            from .predict import logits_for_indices
+
+            fold_logits = logits_for_indices(
+                result.model, inputs, holdout, batch_size=prediction_batch_size,
+            )
+        logits[holdout] = fold_logits
         histories[int(fold)] = result.history
         del result
         cleanup_cuda()
     if not np.isfinite(logits).all():
         raise RuntimeError("OOF prediction coverage is incomplete.")
-    return CrossFitResult(logits=logits, folds=folds.copy(), histories=histories)
+    return CrossFitResult(
+        logits=logits, folds=folds.copy(), histories=histories,
+        window_summaries=window_summaries or None,
+    )
 
 
 def _mcc(labels: np.ndarray, predictions: np.ndarray) -> float:

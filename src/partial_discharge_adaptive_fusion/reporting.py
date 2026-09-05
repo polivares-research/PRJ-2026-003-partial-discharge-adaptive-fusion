@@ -55,6 +55,7 @@ def prediction_frame(
     split: str,
     seed: int,
     config_version: str | None = None,
+    extra_columns: dict[str, np.ndarray] | None = None,
     **probabilities: np.ndarray,
 ) -> pd.DataFrame:
     """Build one aligned prediction table for multiple methods."""
@@ -72,6 +73,11 @@ def prediction_frame(
         if len(values) != len(frame):
             raise ValueError(f"Probability length mismatch for {method}.")
         frame[f"probability_{method}"] = values
+    for name, values in (extra_columns or {}).items():
+        values = np.asarray(values)
+        if len(values) != len(frame):
+            raise ValueError(f"Extra-column length mismatch for {name}.")
+        frame[str(name)] = values
     return frame
 
 

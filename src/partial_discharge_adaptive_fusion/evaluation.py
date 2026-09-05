@@ -73,11 +73,41 @@ def paired_bootstrap_delta(
     labels = np.asarray(labels)
     prediction_a = np.asarray(prediction_a)
     prediction_b = np.asarray(prediction_b)
+    if len(labels) == 0 or len(prediction_a) != len(labels) or len(prediction_b) != len(labels):
+        raise ValueError("Paired bootstrap inputs must be non-empty and equally sized.")
+    if iterations < 1:
+        raise ValueError("Bootstrap iterations must be positive.")
+    if not all(np.isin(values, [0, 1]).all() for values in (labels, prediction_a, prediction_b)):
+        raise ValueError("Paired bootstrap currently requires binary labels and predictions.")
     rng = np.random.default_rng(seed)
+    # A multinomial count per joint (label, prediction_a, prediction_b) state is
+    # exactly equivalent to resampling indices with replacement, but avoids
+    # allocating 10,000 copies of a million-row MATLAB test set.
+    categories = labels.astype(np.int64) * 4 + np.asarray(prediction_a, dtype=np.int64) * 2 + np.asarray(prediction_b, dtype=np.int64)
+    observed_counts = np.bincount(categories, minlength=8).astype(np.float64)
+    probabilities = observed_counts / len(labels)
     values = np.empty(iterations, dtype=np.float64)
-    for index in range(iterations):
-        sample = rng.integers(0, len(labels), len(labels))
-        values[index] = fast_mcc(labels[sample], prediction_a[sample]) - fast_mcc(labels[sample], prediction_b[sample])
+    offset = 0
+    chunk_size = 256
+    while offset < iterations:
+        count = min(chunk_size, iterations - offset)
+        counts = rng.multinomial(len(labels), probabilities, size=count).astype(np.float64)
+        labels_one = counts[:, 4:8].sum(axis=1)
+        labels_zero = counts[:, :4].sum(axis=1)
+        tp_a = counts[:, 6] + counts[:, 7]
+        fp_a = counts[:, 2] + counts[:, 3]
+        fn_a = labels_one - tp_a
+        tn_a = labels_zero - fp_a
+        tp_b = counts[:, 5] + counts[:, 7]
+        fp_b = counts[:, 1] + counts[:, 3]
+        fn_b = labels_one - tp_b
+        tn_b = labels_zero - fp_b
+        den_a = np.sqrt((tp_a + fp_a) * (tp_a + fn_a) * (tn_a + fp_a) * (tn_a + fn_a))
+        den_b = np.sqrt((tp_b + fp_b) * (tp_b + fn_b) * (tn_b + fp_b) * (tn_b + fn_b))
+        mcc_a = np.divide(tp_a * tn_a - fp_a * fn_a, den_a, out=np.zeros_like(den_a), where=den_a != 0)
+        mcc_b = np.divide(tp_b * tn_b - fp_b * fn_b, den_b, out=np.zeros_like(den_b), where=den_b != 0)
+        values[offset:offset + count] = mcc_a - mcc_b
+        offset += count
     return {
         "point_estimate": fast_mcc(labels, prediction_a) - fast_mcc(labels, prediction_b),
         "bootstrap_mean": float(values.mean()), "bootstrap_median": float(np.median(values)),

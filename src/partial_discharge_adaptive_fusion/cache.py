@@ -135,3 +135,18 @@ def load_cache(record: CacheRecord) -> np.ndarray:
     if list(values.shape) != record.metadata["shape"]:
         raise ValueError(f"Cache shape mismatch: {values.shape} != {record.metadata['shape']}")
     return values
+
+
+def load_cache_verified(
+    record: CacheRecord,
+    *,
+    expected_parameters: dict[str, Any],
+) -> np.ndarray:
+    """Load a cache only when its complete preprocessing parameters match."""
+
+    observed = record.metadata.get("parameters")
+    if observed != expected_parameters:
+        raise ValueError(
+            "Incompatible representation cache: preprocessing parameters differ from the requested protocol."
+        )
+    return load_cache(record)

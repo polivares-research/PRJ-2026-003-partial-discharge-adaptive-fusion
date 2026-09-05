@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..config import require_cuda
-from ..modeling.predict import logits_for_array
+from ..modeling.predict import logits_and_window_summaries_for_array, logits_for_array
 from ..modeling.train import (
     CrossFitResult,
     cleanup_cuda,
@@ -38,6 +38,12 @@ class ExpertSeedOutput:
     temporal_histories: dict[int, list[dict[str, float]]]
     cwt_histories: dict[int, list[dict[str, float]]]
     additional_test_logits: dict[str, tuple[np.ndarray, np.ndarray]]
+    temporal_oof_window_summaries: dict[str, np.ndarray] | None = None
+    cwt_oof_window_summaries: dict[str, np.ndarray] | None = None
+    temporal_validation_window_summaries: dict[str, np.ndarray] | None = None
+    cwt_validation_window_summaries: dict[str, np.ndarray] | None = None
+    temporal_test_window_summaries: dict[str, np.ndarray] | None = None
+    cwt_test_window_summaries: dict[str, np.ndarray] | None = None
 
 
 def train_two_experts_for_seed(
@@ -64,6 +70,10 @@ def train_two_experts_for_seed(
     patience: int = 5,
     inference_batch_size: int | None = None,
     gradient_accumulation_steps: int = 1,
+    multi_instance: bool = False,
+    aggregation: str = "top_k_mean",
+    top_k_fraction: float = 0.10,
+    instance_microbatch_size: int = 32,
 ) -> ExpertSeedOutput:
     """Train temporal/CWT experts, OOF cross-fit them, and predict held-out data.
 
@@ -94,6 +104,8 @@ def train_two_experts_for_seed(
         learning_rate=learning_rate, weight_decay=weight_decay, patience=patience,
         validation_batch_size=prediction_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        multi_instance=multi_instance, aggregation=aggregation,
+        top_k_fraction=top_k_fraction, instance_microbatch_size=instance_microbatch_size,
     )
     print(f"seed {seed}: CWT OOF ({len(np.unique(oof_folds))} folds)", flush=True)
     cwt_oof: CrossFitResult = cross_fitted_logits(
@@ -103,6 +115,8 @@ def train_two_experts_for_seed(
         learning_rate=learning_rate, weight_decay=weight_decay, patience=patience,
         validation_batch_size=prediction_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        multi_instance=multi_instance, aggregation=aggregation,
+        top_k_fraction=top_k_fraction, instance_microbatch_size=instance_microbatch_size,
     )
 
     print(f"seed {seed}: final temporal fit", flush=True)
@@ -112,14 +126,27 @@ def train_two_experts_for_seed(
         pos_weight=global_weight, learning_rate=learning_rate, weight_decay=weight_decay,
         patience=patience, validation_batch_size=prediction_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        multi_instance=multi_instance, aggregation=aggregation,
+        top_k_fraction=top_k_fraction, instance_microbatch_size=instance_microbatch_size,
     )
-    temporal_validation = logits_for_array(temporal_result.model, validation_temporal, batch_size=prediction_batch_size)
-    temporal_test = logits_for_array(temporal_result.model, test_temporal, batch_size=prediction_batch_size)
+    if multi_instance:
+        temporal_validation, temporal_validation_summary = logits_and_window_summaries_for_array(
+            temporal_result.model, validation_temporal, batch_size=prediction_batch_size,
+        )
+        temporal_test, temporal_test_summary = logits_and_window_summaries_for_array(
+            temporal_result.model, test_temporal, batch_size=prediction_batch_size,
+        )
+    else:
+        temporal_validation = logits_for_array(temporal_result.model, validation_temporal, batch_size=prediction_batch_size)
+        temporal_test = logits_for_array(temporal_result.model, test_temporal, batch_size=prediction_batch_size)
+        temporal_validation_summary = None
+        temporal_test_summary = None
     additional_temporal: dict[str, np.ndarray] = {}
     additional_cwt: dict[str, np.ndarray] = {}
     for name, (additional_temporal_values, additional_cwt_values) in (additional_tests or {}).items():
         additional_temporal[name] = logits_for_array(
             temporal_result.model, additional_temporal_values, batch_size=prediction_batch_size,
+            multi_instance=multi_instance,
         )
     del temporal_result
     cleanup_cuda()
@@ -131,13 +158,26 @@ def train_two_experts_for_seed(
         pos_weight=global_weight, learning_rate=learning_rate, weight_decay=weight_decay,
         patience=patience, validation_batch_size=prediction_batch_size,
         gradient_accumulation_steps=gradient_accumulation_steps,
+        multi_instance=multi_instance, aggregation=aggregation,
+        top_k_fraction=top_k_fraction, instance_microbatch_size=instance_microbatch_size,
     )
-    cwt_validation = logits_for_array(cwt_result.model, validation_cwt, batch_size=prediction_batch_size)
-    cwt_test = logits_for_array(cwt_result.model, test_cwt, batch_size=prediction_batch_size)
+    if multi_instance:
+        cwt_validation, cwt_validation_summary = logits_and_window_summaries_for_array(
+            cwt_result.model, validation_cwt, batch_size=prediction_batch_size,
+        )
+        cwt_test, cwt_test_summary = logits_and_window_summaries_for_array(
+            cwt_result.model, test_cwt, batch_size=prediction_batch_size,
+        )
+    else:
+        cwt_validation = logits_for_array(cwt_result.model, validation_cwt, batch_size=prediction_batch_size)
+        cwt_test = logits_for_array(cwt_result.model, test_cwt, batch_size=prediction_batch_size)
+        cwt_validation_summary = None
+        cwt_test_summary = None
     additional_test_logits = {
         name: (
             additional_temporal[name],
-            logits_for_array(cwt_result.model, additional_cwt_values, batch_size=prediction_batch_size),
+            logits_for_array(cwt_result.model, additional_cwt_values, batch_size=prediction_batch_size,
+                             multi_instance=multi_instance),
         )
         for name, (additional_temporal_values, additional_cwt_values) in (additional_tests or {}).items()
     }
@@ -151,4 +191,10 @@ def train_two_experts_for_seed(
         temporal_oof_folds=temporal_oof.folds, cwt_oof_folds=cwt_oof.folds,
         temporal_histories=temporal_oof.histories, cwt_histories=cwt_oof.histories,
         additional_test_logits=additional_test_logits,
+        temporal_oof_window_summaries=temporal_oof.window_summaries,
+        cwt_oof_window_summaries=cwt_oof.window_summaries,
+        temporal_validation_window_summaries=temporal_validation_summary,
+        cwt_validation_window_summaries=cwt_validation_summary,
+        temporal_test_window_summaries=temporal_test_summary,
+        cwt_test_window_summaries=cwt_test_summary,
     )

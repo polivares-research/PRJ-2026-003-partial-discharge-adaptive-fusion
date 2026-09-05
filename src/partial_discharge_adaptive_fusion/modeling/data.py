@@ -34,3 +34,28 @@ class NumpyDataset(Dataset):
         if self.labels is None:
             return tensor
         return tensor, torch.tensor(float(self.labels[index]), dtype=torch.float32)
+
+
+class MultiInstanceDataset(Dataset):
+    """Dataset returning one fixed-size bag of instances per parent signal."""
+
+    def __init__(self, values, labels=None, indices=None):
+        values = np.asarray(values)
+        if values.ndim < 3:
+            raise ValueError("Multi-instance values must be [signals, windows, ...].")
+        self.values = values
+        self.labels = None if labels is None else np.asarray(labels)
+        self.indices = np.arange(len(values), dtype=np.int64) if indices is None else np.asarray(indices, dtype=np.int64)
+        if self.labels is not None and len(self.labels) != len(values):
+            raise ValueError("Labels must align with the complete bag array.")
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, position):
+        index = int(self.indices[position])
+        value = np.array(self.values[index], dtype=np.float32, copy=True)
+        tensor = torch.from_numpy(value)
+        if self.labels is None:
+            return tensor
+        return tensor, torch.tensor(float(self.labels[index]), dtype=torch.float32)

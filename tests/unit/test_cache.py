@@ -1,6 +1,8 @@
 import numpy as np
 
-from partial_discharge_adaptive_fusion.cache import load_cache, write_array_cache, write_cwt_cache
+import pytest
+
+from partial_discharge_adaptive_fusion.cache import load_cache, load_cache_verified, write_array_cache, write_cwt_cache
 
 
 def test_array_cache_is_reopenable_and_records_provenance(tmp_path):
@@ -13,6 +15,9 @@ def test_array_cache_is_reopenable_and_records_provenance(tmp_path):
     assert reopened.shape == (3, 4)
     assert np.array_equal(reopened, values)
     assert record.metadata["dataset_version"] == "v1"
+    assert np.array_equal(load_cache_verified(record, expected_parameters={"standardized": True}), values)
+    with pytest.raises(ValueError, match="Incompatible"):
+        load_cache_verified(record, expected_parameters={"standardized": False})
 
 
 def test_cwt_cache_has_expected_shape(tmp_path):

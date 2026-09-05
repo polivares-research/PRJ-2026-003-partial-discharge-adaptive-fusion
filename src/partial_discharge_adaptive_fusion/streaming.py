@@ -71,5 +71,8 @@ def write_stream_cache(
     if offset != n_samples:
         raise ValueError(f"Streaming cache coverage mismatch: wrote {offset}, expected {n_samples}.")
     record = {"shape": list(output_shape), "dtype": str(np.dtype(dtype)), **(metadata or {})}
+    # Keep a canonical nested parameter payload so callers can reject a same-
+    # shape cache produced by a different window/preprocessing protocol.
+    record.setdefault("parameters", dict(metadata or {}))
     destination.with_suffix(".json").write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
     return destination

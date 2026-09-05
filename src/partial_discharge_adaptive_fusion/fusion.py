@@ -107,11 +107,21 @@ def fit_reliability_models(
         raise ValueError("Reliability features and labels have incompatible shapes.")
     target_temporal = (temporal_probability >= 0.5).astype(np.int64) == labels
     target_cwt = (cwt_probability >= 0.5).astype(np.int64) == labels
-    temporal = make_reliability_model(model_name, seed)
-    cwt = make_reliability_model(model_name, seed + 1)
-    temporal.fit(features, target_temporal.astype(np.int64))
-    cwt.fit(features, target_cwt.astype(np.int64))
+    temporal = _fit_reliability_classifier(features, target_temporal.astype(np.int64), model_name, seed)
+    cwt = _fit_reliability_classifier(features, target_cwt.astype(np.int64), model_name, seed + 1)
     return ReliabilityModels(temporal=temporal, cwt=cwt, model_name=model_name, seed=seed)
+
+
+def _fit_reliability_classifier(features: np.ndarray, target: np.ndarray, model_name: str, seed: int) -> Any:
+    """Fit a reliability classifier, including the valid one-class edge case."""
+
+    from sklearn.dummy import DummyClassifier
+
+    model = make_reliability_model(model_name, seed) if np.unique(target).size > 1 else DummyClassifier(
+        strategy="constant", constant=int(target[0]),
+    )
+    model.fit(features, target)
+    return model
 
 
 def predict_reliability(
@@ -161,6 +171,42 @@ def reliability_features(
         (distance_temporal[:, 0] - distance_temporal[:, 1])[:, None],
         (distance_cwt[:, 0] - distance_cwt[:, 1])[:, None], np.asarray(signal_summary),
     ]
+    return np.nan_to_num(np.column_stack(parts), nan=0.0, posinf=1e6, neginf=-1e6)
+
+
+def signal_level_reliability_features(
+    logit_temporal: np.ndarray,
+    logit_cwt: np.ndarray,
+    probability_temporal: np.ndarray,
+    probability_cwt: np.ndarray,
+    *,
+    window_summaries_temporal: dict[str, np.ndarray] | None = None,
+    window_summaries_cwt: dict[str, np.ndarray] | None = None,
+) -> np.ndarray:
+    """Build leakage-safe signal-level reliability features.
+
+    The optional window summaries are intentionally appended only after the
+    parent-signal probabilities.  They are diagnostic proposed features, not
+    window-level labels or extra evaluation samples.
+    """
+
+    pt = np.asarray(probability_temporal, dtype=np.float64)
+    pc = np.asarray(probability_cwt, dtype=np.float64)
+    parts = [
+        np.asarray(logit_temporal, dtype=np.float64)[:, None],
+        np.asarray(logit_cwt, dtype=np.float64)[:, None],
+        pt[:, None], pc[:, None],
+        np.abs(pt - 0.5)[:, None], np.abs(pc - 0.5)[:, None],
+        normalized_entropy(pt)[:, None], normalized_entropy(pc)[:, None],
+        np.maximum(pt, 1 - pt)[:, None], np.maximum(pc, 1 - pc)[:, None],
+        np.abs(pt - pc)[:, None], (pt - pc)[:, None],
+        ((pt >= 0.5) == (pc >= 0.5)).astype(float)[:, None],
+    ]
+    for summaries in (window_summaries_temporal, window_summaries_cwt):
+        if summaries:
+            parts.append(np.column_stack([
+                np.asarray(summaries[name], dtype=np.float64) for name in sorted(summaries)
+            ]))
     return np.nan_to_num(np.column_stack(parts), nan=0.0, posinf=1e6, neginf=-1e6)
 
 
