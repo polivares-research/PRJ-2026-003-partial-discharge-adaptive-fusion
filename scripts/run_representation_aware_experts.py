@@ -218,6 +218,11 @@ def _run_dataset(args, config: dict, dataset_id: str) -> None:
             ].reset_index(drop=True)
             for split in ("train", "validation", "test")
         }
+        # The split manifest uses the common ``sample_id`` name while the raw
+        # VSB metadata calls the same parent signal key ``signal_id``. Keep
+        # both names so reporting and raw-signal iteration remain aligned.
+        for frame in frames.values():
+            frame["sample_id"] = frame["signal_id"].astype(str)
         raw_factories = {
             split: _factory_from_vsb(dataset, frame, args.io_batch_size)
             for split, frame in frames.items()
