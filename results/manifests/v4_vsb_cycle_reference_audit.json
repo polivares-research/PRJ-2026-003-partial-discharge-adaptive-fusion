@@ -1,0 +1,15 @@
+{
+  "cycle_consistency_enabled": false,
+  "dataset_id": "engineering-vsb-power-line-fault-detection",
+  "dataset_version": "2018-kaggle-snapshot",
+  "decision": "not_proven_from_local_raw_metadata",
+  "metadata_phase_or_cycle_columns": [],
+  "n_measurements": 2904,
+  "n_signals": 8712,
+  "native_signal_audit_completed": true,
+  "phase_alignment_proven": false,
+  "reason": "The local metadata identifies measurements and phases but does not provide an explicit phase reference or cycle alignment contract.",
+  "sampling_frequency_hz": 40000000.0,
+  "signal_duration_seconds": 0.02,
+  "signal_length": 800000
+}
