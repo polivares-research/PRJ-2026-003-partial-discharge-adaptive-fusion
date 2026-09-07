@@ -16,13 +16,13 @@ from .pulse_impl import (
 
 @dataclass(frozen=True)
 class CycleReference(_impl.CycleReference):
-    """Cycle landmarks, including whether one crossing was inferred circularly."""
+    """Cycle landmarks, including whether one landmark was inferred."""
 
     inferred_missing_crossing: bool = False
 
 
 def detect_cycle_reference(signal: np.ndarray, policy: PulsePolicy) -> CycleReference:
-    """Find a centered rising/falling pair, allowing a circular edge crossing."""
+    """Find a centered crossing and use the registered half-cycle period."""
 
     values = np.asarray(signal, dtype=np.float32)
     if values.ndim != 1 or len(values) != policy.signal_length:
@@ -41,12 +41,10 @@ def detect_cycle_reference(signal: np.ndarray, policy: PulsePolicy) -> CycleRefe
     if len(rising) == 0:
         opposite = int(falling[0])
         origin = (opposite + expected) % n_samples
-        separation = expected
         inferred = True
     elif len(falling) == 0:
         origin = int(rising[0])
         opposite = (origin + expected) % n_samples
-        separation = expected
         inferred = True
     else:
         pairs = []
@@ -56,7 +54,11 @@ def detect_cycle_reference(signal: np.ndarray, policy: PulsePolicy) -> CycleRefe
                 pairs.append((int(candidate_origin), int(candidate_opposite), distance))
         origin, opposite, separation = min(pairs, key=lambda pair: abs(pair[2] - expected))
         if abs(separation - expected) > expected // 4:
-            raise ValueError("Centered zero-crossing separation is incompatible with one VSB half-cycle")
+            # The signal still provides a phase crossing, but its counterpart
+            # is not a reliable landmark. Use the registered one-cycle period.
+            origin = int(rising[0])
+            opposite = (origin + expected) % n_samples
+            inferred = True
     return CycleReference(
         origin=origin, opposite=opposite, half_period=expected,
         zero_crossings=_impl._crossings(centered), origin_polarity="rising",
