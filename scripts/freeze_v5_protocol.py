@@ -1,0 +1,71 @@
+"""Freeze V5 only after a passing development gate."""
+
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+from pathlib import Path
+
+import yaml
+
+from partial_discharge_adaptive_fusion.protocol import load_experiment_config
+from partial_discharge_adaptive_fusion.v5_protocol import (
+    V5_CANDIDATE_IDS,
+    assert_v5_holdouts_closed,
+    select_v5_candidate,
+    validate_v5_config,
+)
+
+
+def freeze(config_path: Path, gate_path: Path, output_path: Path) -> dict:
+    config = load_experiment_config(config_path)
+    assert_v5_holdouts_closed(config)
+    summary = yaml.safe_load(gate_path.read_text(encoding="utf-8"))
+    if summary.get("holdouts_opened") is not False:
+        raise RuntimeError("The gate summary does not prove that holdouts stayed closed")
+    decisions = []
+    for candidate_id, payload in summary.get("candidate_decisions", {}).items():
+        if candidate_id not in V5_CANDIDATE_IDS:
+            raise RuntimeError(f"Unexpected candidate in gate summary: {candidate_id}")
+        from partial_discharge_adaptive_fusion.v5_protocol import V5GateDecision
+
+        decisions.append(V5GateDecision(**payload))
+    selected = select_v5_candidate(decisions)
+    frozen = deepcopy(config)
+    frozen["protocol_status"] = "frozen"
+    frozen["datasets"]["engineering-partial-discharge-noise-signals"]["input_policy"]["status"] = "frozen"
+    vsb_policy = frozen["datasets"]["engineering-vsb-power-line-fault-detection"]["input_policy"]
+    vsb_policy["status"] = "frozen"
+    vsb_policy["selected_candidate"] = selected.candidate_id
+    vsb_policy["selection_metrics"] = {
+        "mean_best_individual_mcc": selected.mean_best_individual_mcc,
+        "mean_second_expert_mcc": selected.mean_second_expert_mcc,
+        "minimum_seed_best_individual_mcc": selected.minimum_seed_best_individual_mcc,
+        "minimum_seed_second_expert_mcc": selected.minimum_seed_second_expert_mcc,
+    }
+    frozen["freeze_record"] = {
+        "v5_protocol_version": "v5-pulse-aware-v1",
+        "selected_candidate": selected.candidate_id,
+        "holdouts_opened_before_freeze": False,
+        "gate_summary": str(gate_path),
+        "candidate_decision": selected.__dict__,
+    }
+    validate_v5_config(frozen)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(yaml.safe_dump(frozen, sort_keys=False), encoding="utf-8")
+    return frozen
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=Path, default=Path("configs/experiments/two-dataset-confirmatory-v5-pulse-aware-localraw.yaml"))
+    parser.add_argument("--gate", type=Path, default=Path("reports/metrics/v5-pulse-aware/development_gate.json"))
+    parser.add_argument("--output", type=Path, default=Path("configs/experiments/two-dataset-confirmatory-v5-pulse-aware-localraw-frozen.yaml"))
+    args = parser.parse_args(argv)
+    freeze(args.config, args.gate, args.output)
+    print(args.output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
