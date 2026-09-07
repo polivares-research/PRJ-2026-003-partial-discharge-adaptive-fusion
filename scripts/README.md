@@ -72,3 +72,8 @@ This is the only script that imports `researchdata`, and only on the source
 machine. It copies the required MATLAB and VSB files, writes a portable local
 inventory, and leaves the raw files ignored by Git. The destination server
 does not need Atlas, the catalog, or `researchdata`.
+
+
+## V4
+
+Use `execute_v4_pipeline.py` for the gated V4 workflow. `run_v4_development_gate.py` never opens Te2 or the VSB grouped holdout; `freeze_v4_protocol.py` refuses to create the frozen YAML unless the development gate passes.

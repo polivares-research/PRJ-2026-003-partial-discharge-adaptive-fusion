@@ -19,3 +19,8 @@ file. The expert notebooks are dry wrappers by default and require
 the `partial-discharge` kernel, `PD_RAW_DATA_ROOT` (default `data/raw`), CUDA
 and `PD_RUN_EXPERIMENT=1` to launch training. The original v1 batch-128 path
 and native VSB v2 YAML/results are kept separately as historical references.
+
+
+## V4 development gate
+
+The V4 notebooks describe the local `data/raw` interface, geometry-aware representations, the development-only expert gate, cache provenance, runtime timing, and the best-individual fusion comparison. They are documentation and reporting wrappers; reusable implementation remains in `src/` and `scripts/`.

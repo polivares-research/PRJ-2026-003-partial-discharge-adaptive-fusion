@@ -27,3 +27,8 @@ seed 42 only. It writes the frozen
 `two-dataset-confirmatory-v3-windowed-localraw.yaml`, which applies the shared
 encoder/bag abstraction: MATLAB `K=1`, VSB `K>1`, parent-signal loss and
 signal-level evaluation. Its results are stored separately from v1/v2.
+
+
+## V4 gated execution
+
+`two-dataset-confirmatory-v4-windowed-localraw.yaml` is a development-selection configuration. Run `scripts/execute_v4_pipeline.py` from the repository root with `PD_RAW_DATA_ROOT` or `--raw-root`. The command audits VSB cycle metadata, evaluates seeds 42–44 without holdouts, freezes the selected candidate, and only then runs confirmatory seeds 42–46.
