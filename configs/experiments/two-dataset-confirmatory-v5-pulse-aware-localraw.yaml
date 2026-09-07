@@ -1,0 +1,171 @@
+config_version: two-dataset-confirmatory-v5-pulse-aware-localraw
+parent_config_version: two-dataset-confirmatory-v4-windowed-localraw
+protocol_status: development_selection
+preprocessing_version: v5-pulse-detector-v1
+objective: Pulse-aware VSB experts with leakage-safe adaptive fusion
+data_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+  unavailable_external_workspace: /home/polivares/Dropbox/Work/researchhub-atlas-polivares/workspaces/PRJ-2026-003-partial-discharge-adaptive-fusion
+  external_catalog_status: UNRESOLVED_NOT_MOUNTED
+datasets:
+  engineering-partial-discharge-noise-signals:
+    version: v1
+    role: matlab_pd_noise_reference
+    local_directory: dataset-pd-noise
+    train: Tr1.mat
+    validation: Va1.mat
+    secondary_test: Te1.mat
+    confirmatory_test: Te2.mat
+    input_policy:
+      status: candidate
+      temporal: standardized_400_sample_signal
+      cwt: morlet_log_power_32_scales_120_time_bins
+      redesign: false
+    grouping: source_partitions
+  engineering-vsb-power-line-fault-detection:
+    version: 2018-kaggle-snapshot
+    role: vsb_pd_pulse_aware
+    local_directory: dataset-vsb-power-line-fault-detection
+    labeled_source: train.parquet + metadata_train.csv
+    official_test: excluded_from_scientific_metrics_because_unlabeled
+    input_policy:
+      status: candidate
+      label_unit: parent_signal
+      group_column: id_measurement
+      pulse_detector: dual_cycon_informed_signal_level_adaptation
+      cycle_reference: moving_average_10000_zero_crossings
+      high_pass: alpha_100_beta_1
+      knee_smoothing_length: 9
+      temporal_pulse_length: 128
+      cwt_pulse_length: 512
+      cwt_wavelet: complex_morlet
+      cwt_morlet_w0: 6.0
+      cwt_scales: logspace_1.5_to_64_samples
+      cwt_time_bins: 128
+      cwt_transform: log_power
+      local_segment_padding: none
+      bag_padding: zero_with_validity_mask
+    grouping: id_measurement
+splits:
+  split_seed: 42
+  oof_folds: 5
+  preserve_source_matlab_partitions: true
+  vsb_group_column: id_measurement
+  vsb_target_holdout_approximation: 60_percent_train_20_percent_validation_20_percent_test
+seeds: [42, 43, 44, 45, 46]
+experts:
+  temporal_kind: pulse_temporal
+  cwt_kind: pulse_cwt
+  temporal:
+    architecture: PulseTemporalEncoder_shared_residual_dilated
+    input_length: 128
+    optimizer: Adam
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    loss: signal_level_bce_plus_registered_cycle_consistency
+  cwt:
+    architecture: PulseCWTEncoder_compact_residual
+    input_length: 512
+    optimizer: Adam
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    loss: signal_level_bce
+  epochs:
+    temporal: 9
+    cwt: 7
+  batch_size: 4
+  inference_batch_size: 16
+  gradient_accumulation_steps: 1
+  pulse_microbatch_size: 32
+  imbalance: fold_local_pos_weight
+fusion:
+  fixed_weight_grid: 0.0_to_1.0_step_0.05
+  threshold_grid: 0.05_to_0.95_step_0.005
+  reliability_models: [logistic, hist_gradient_boosting, small_mlp]
+  reliability_selection: validation_brier_then_roc_auc
+  conservative_delta_grid: [0.0, 0.02, 0.05, 0.1, 0.15, 0.2, 0.25]
+  primary_static_comparison: best_fixed_minus_validation_selected_best_individual
+  adaptive_comparisons: [adaptive_minus_best_fixed, adaptive_minus_best_individual]
+evaluation:
+  primary_metric: MCC
+  secondary_metrics: [accuracy, precision, recall_pd, specificity, f1, pr_auc, roc_auc, brier, ece]
+  paired_bootstrap_iterations_per_seed: 10000
+  mcnemar: exact_two_sided
+  no_raw_sample_pooling_across_datasets: true
+protection:
+  cuda_required_for_training: true
+  cpu_fallback: forbidden
+  te2_before_protocol_freeze: forbidden
+  vsb_holdout_before_gate: forbidden
+  official_unlabeled_test_access: forbidden
+  test_tuning: forbidden
+  external_vsb_weights: forbidden
+selection:
+  development_seeds: [42, 43, 44]
+  allowed_split: train_and_validation_only
+  blocked_splits: [test, test_confirmatory, official_unlabeled_test]
+  gate:
+    stop_mean_best_individual_mcc: 0.60
+    pass_mean_best_individual_mcc: 0.70
+    pass_mean_second_expert_mcc: 0.65
+    stop_if_any_seed_best_individual_mcc_at_or_below: 0.60
+    preferred_mean_best_individual_mcc: 0.75
+  model_candidates:
+    v4_uniform_control:
+      temporal_kind: geometry_adapted_temporal
+      cwt_kind: geometry_adapted_cwt
+      representation: v4_uniform_windows
+      holdout_access: false
+      compute_cost: 1.0
+    pulse_np86_cwt32:
+      temporal_kind: pulse_temporal
+      cwt_kind: pulse_cwt
+      n_pulses_per_half: 86
+      cwt_scales: 32
+      cycle_consistency: true
+      holdout_access: false
+      compute_cost: 2.0
+    pulse_np86_cwt64:
+      temporal_kind: pulse_temporal
+      cwt_kind: pulse_cwt
+      n_pulses_per_half: 86
+      cwt_scales: 64
+      cycle_consistency: true
+      holdout_access: false
+      compute_cost: 2.5
+    pulse_np257_cwt64:
+      temporal_kind: pulse_temporal
+      cwt_kind: pulse_cwt
+      n_pulses_per_half: 257
+      cwt_scales: 64
+      cycle_consistency: true
+      holdout_access: false
+      compute_cost: 4.0
+  selection_rule: [highest_mean_best_individual_mcc, highest_mean_second_expert_mcc, lowest_compute_cost]
+cycle_reference:
+  audit_required: true
+  source_label: LITERATURE-INSPIRED_SIGNAL-LEVEL_ADAPTATION
+  cycle_consistency_default: disabled_until_phase_alignment_is_proven
+  dual_cycon_code_status: unavailable_until_provenance_license_and_reproducibility_audit
+outputs:
+  results_root: results/runs/v5-pulse-aware
+  cache_root: results/cache/v5-pulse-aware
+  manifest_root: results/manifests
+  reports_root: reports
+  development_gate_summary: reports/metrics/v5-pulse-aware/development_gate.json
+  frozen_config: configs/experiments/two-dataset-confirmatory-v5-pulse-aware-localraw-frozen.yaml
+  metrics_namespace: v5-pulse-aware
+  statistical_namespace: v5-pulse-aware
+  predictions_format: parquet
+  summaries_format: csv_json_yaml
+runtime:
+  num_workers: 2
+  persistent_workers: true
+  prefetch_factor: 2
+  pin_memory: true
+  mixed_precision: false
+  equivalence_required: true
+environment: partial-discharge
+device_policy: cuda_required
