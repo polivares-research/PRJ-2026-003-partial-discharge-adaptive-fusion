@@ -2,50 +2,65 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 
 from . import pulse_impl as _impl
-from .pulse_impl import (  # noqa: F401
-    PULSE_PREPROCESSING_VERSION,
-    CycleReference,
-    PeakDetection,
-    PulseBag,
-    PulsePolicy,
-    flatten_signal,
-    pulse_coverage_report,
+from .pulse_impl import (
+    PULSE_PREPROCESSING_VERSION, PeakDetection, PulseBag, PulsePolicy,
+    flatten_signal, pulse_coverage_report,
 )
 
 
+@dataclass(frozen=True)
+class CycleReference(_impl.CycleReference):
+    """Cycle landmarks, including whether one crossing was inferred circularly."""
+
+    inferred_missing_crossing: bool = False
+
+
 def detect_cycle_reference(signal: np.ndarray, policy: PulsePolicy) -> CycleReference:
-    """Find a circular rising/falling pair around the centered smooth signal."""
+    """Find a centered rising/falling pair, allowing a circular edge crossing."""
 
     values = np.asarray(signal, dtype=np.float32)
     if values.ndim != 1 or len(values) != policy.signal_length:
         raise ValueError(f"Expected one signal of length {policy.signal_length}, got {values.shape}")
     if not np.isfinite(values).all():
         raise ValueError("Signal contains non-finite values")
-    smooth = uniform_filter1d(
-        values.astype(np.float64), size=policy.moving_average_samples, mode="nearest",
-    )
+    smooth = uniform_filter1d(values.astype(np.float64), size=policy.moving_average_samples, mode="nearest")
     centered = smooth - np.median(smooth)
     rising = np.flatnonzero((centered[:-1] <= 0) & (centered[1:] > 0)) + 1
     falling = np.flatnonzero((centered[:-1] >= 0) & (centered[1:] < 0)) + 1
-    if len(rising) == 0 or len(falling) == 0:
-        raise ValueError("Unable to identify both centered rising and falling zero crossings")
+    if len(rising) == 0 and len(falling) == 0:
+        raise ValueError("Unable to identify any centered zero crossing")
     expected = policy.half_length
     n_samples = len(values)
-    pairs = []
-    for origin in rising:
-        for opposite in falling:
-            separation = int(opposite - origin) if opposite > origin else int(opposite + n_samples - origin)
-            pairs.append((int(origin), int(opposite), separation))
-    origin, opposite, separation = min(pairs, key=lambda pair: abs(pair[2] - expected))
-    if abs(separation - expected) > expected // 4:
-        raise ValueError("Centered zero-crossing separation is incompatible with one VSB half-cycle")
+    inferred = False
+    if len(rising) == 0:
+        opposite = int(falling[0])
+        origin = (opposite + expected) % n_samples
+        separation = expected
+        inferred = True
+    elif len(falling) == 0:
+        origin = int(rising[0])
+        opposite = (origin + expected) % n_samples
+        separation = expected
+        inferred = True
+    else:
+        pairs = []
+        for candidate_origin in rising:
+            for candidate_opposite in falling:
+                distance = int(candidate_opposite - candidate_origin) if candidate_opposite > candidate_origin else int(candidate_opposite + n_samples - candidate_origin)
+                pairs.append((int(candidate_origin), int(candidate_opposite), distance))
+        origin, opposite, separation = min(pairs, key=lambda pair: abs(pair[2] - expected))
+        if abs(separation - expected) > expected // 4:
+            raise ValueError("Centered zero-crossing separation is incompatible with one VSB half-cycle")
     return CycleReference(
         origin=origin, opposite=opposite, half_period=expected,
         zero_crossings=_impl._crossings(centered), origin_polarity="rising",
+        inferred_missing_crossing=inferred,
     )
 
 
@@ -72,14 +87,13 @@ def detect_pulses(signal: np.ndarray, policy: PulsePolicy) -> PeakDetection:
         counts.append(count)
     return PeakDetection(
         aligned_signal=aligned, flattened_signal=flattened, reference=reference,
-        peak_indices=(peak_sets[0], peak_sets[1]),
-        peak_amplitudes=(amplitude_sets[0], amplitude_sets[1]),
+        peak_indices=(peak_sets[0], peak_sets[1]), peak_amplitudes=(amplitude_sets[0], amplitude_sets[1]),
         selected_counts=(counts[0], counts[1]),
     )
 
 
 def prepare_pulse_bag(signal: np.ndarray, policy: PulsePolicy) -> PulseBag:
-    """Create temporal/CWT bags using the public centered cycle detector."""
+    """Create temporal/CWT bags using the centered cycle detector."""
 
     detected = detect_pulses(signal, policy)
     temporal = np.zeros((2, policy.n_pulses_per_half, policy.temporal_length), dtype=np.float32)
