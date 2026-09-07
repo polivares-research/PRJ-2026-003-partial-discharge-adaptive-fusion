@@ -23,7 +23,7 @@ DATASETS = {
     "matlab": "engineering-partial-discharge-noise-signals",
     "vsb": "engineering-vsb-power-line-fault-detection",
 }
-METHODS = ("temporal", "cwt", "fixed_50_50", "best_fixed", "adaptive", "conservative", "oracle")
+METHODS = ("temporal", "cwt", "best_individual", "fixed_50_50", "best_fixed", "adaptive", "conservative", "oracle")
 
 
 def _logit(probability: np.ndarray) -> np.ndarray:
@@ -174,9 +174,19 @@ def _evaluate_seed(frame: pd.DataFrame, config: dict, seed: int) -> tuple[list[d
         "fixed_50_50": fixed_50_threshold, "best_fixed": best_fixed["threshold"],
         "adaptive": adaptive_threshold, "conservative": select_threshold(labels_validation, conservative["validation"]),
     }
+    individual_validation_scores = {
+        method: binary_metrics(
+            labels_validation, p_validation[method], thresholds[method],
+        )["mcc"] for method in ("temporal", "cwt")
+    }
+    best_individual_method = max(
+        ("temporal", "cwt"), key=lambda method: individual_validation_scores[method],
+    )
+    thresholds["best_individual"] = thresholds[best_individual_method]
     method_probabilities = {
         "temporal": {name: values["temporal"] for name, values in probabilities.items()},
         "cwt": {name: values["cwt"] for name, values in probabilities.items()},
+        "best_individual": {name: values[best_individual_method] for name, values in probabilities.items()},
         "fixed_50_50": fixed_50, "best_fixed": fixed_probabilities,
         "adaptive": adaptive, "conservative": conservative,
         "oracle": {
@@ -218,12 +228,13 @@ def _run_dataset(dataset_slug: str, config: dict, args) -> dict[str, object]:
         metric_rows.extend(rows)
         records.append(record)
     metrics = pd.DataFrame(metric_rows)
-    output_root = Path(config["outputs"]["reports_root"]) / "metrics" / "v3-windowed"
+    namespace = config["outputs"].get("metrics_namespace", "v3-windowed")
+    output_root = Path(config["outputs"]["reports_root"]) / "metrics" / namespace
     output_root.mkdir(parents=True, exist_ok=True)
     metrics.to_csv(output_root / f"{dataset_slug}_per_seed.csv", index=False)
     comparisons = {}
     test_split = "test_confirmatory" if (metrics["split"] == "test_confirmatory").any() else "test_grouped_holdout"
-    for a, b in (("adaptive", "best_fixed"), ("adaptive", "fixed_50_50"), ("best_fixed", "temporal")):
+    for a, b in (("adaptive", "best_fixed"), ("adaptive", "fixed_50_50"), ("best_fixed", "best_individual"), ("best_fixed", "temporal")):
         seed_deltas = []
         bootstrap = []
         mcnemar = []
@@ -258,7 +269,10 @@ def _verdict(summaries: dict[str, dict[str, object]]) -> str:
         all(float(row["ci_95"][0]) > 0 for row in summaries[dataset]["comparisons"]["adaptive_minus_best_fixed"]["per_seed_bootstrap"])
         for dataset in summaries
     )
-    static = all(item["positive_seeds"] >= 4 for item in [summaries[dataset]["comparisons"]["best_fixed_minus_temporal"]["seed_summary"] for dataset in summaries])
+    static = all(
+        summaries[dataset]["comparisons"]["best_fixed_minus_best_individual"]["seed_summary"]["positive_seeds"] >= 4
+        for dataset in summaries
+    )
     if strong:
         return "ADAPTIVE FUSION CONFIRMED ACROSS DATASETS"
     if static and any(item["positive_seeds"] >= 3 for item in adaptive):
@@ -280,7 +294,8 @@ def main(argv: list[str] | None = None) -> int:
     assert_protocol_frozen(config)
     slugs = ("matlab", "vsb") if args.dataset == "both" else (args.dataset,)
     summaries = {slug: _run_dataset(slug, config, args) for slug in slugs}
-    output = Path(config["outputs"]["reports_root"]) / "statistical_analysis" / "v3-windowed"
+    namespace = config["outputs"].get("statistical_namespace", "v3-windowed")
+    output = Path(config["outputs"]["reports_root"]) / "statistical_analysis" / namespace
     output.mkdir(parents=True, exist_ok=True)
     cross_dataset = {
         "datasets": {

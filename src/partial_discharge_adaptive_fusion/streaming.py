@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -55,24 +56,31 @@ def write_stream_cache(
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     output_shape = (int(n_samples), *sample_shape)
-    mmap = np.lib.format.open_memmap(destination, mode="w+", dtype=dtype, shape=output_shape)
+    temporary = destination.with_name(destination.name + ".tmp")
+    mmap = np.lib.format.open_memmap(temporary, mode="w+", dtype=dtype, shape=output_shape)
     offset = 0
-    for values in batches():
-        transformed = np.asarray(transform(np.asarray(values)), dtype=dtype)
-        if transformed.ndim != len(sample_shape) + 1 or transformed.shape[1:] != sample_shape:
-            raise ValueError(f"Unexpected transformed batch shape: {transformed.shape}")
-        stop = offset + len(transformed)
-        if stop > n_samples:
-            raise ValueError("Streaming cache received more samples than declared.")
-        mmap[offset:stop] = transformed
-        offset = stop
-    mmap.flush()
-    del mmap
+    try:
+        for values in batches():
+            transformed = np.asarray(transform(np.asarray(values)), dtype=dtype)
+            if transformed.ndim != len(sample_shape) + 1 or transformed.shape[1:] != sample_shape:
+                raise ValueError(f"Unexpected transformed batch shape: {transformed.shape}")
+            stop = offset + len(transformed)
+            if stop > n_samples:
+                raise ValueError("Streaming cache received more samples than declared.")
+            mmap[offset:stop] = transformed
+            offset = stop
+        mmap.flush()
+    finally:
+        del mmap
     if offset != n_samples:
         raise ValueError(f"Streaming cache coverage mismatch: wrote {offset}, expected {n_samples}.")
+    os.replace(temporary, destination)
     record = {"shape": list(output_shape), "dtype": str(np.dtype(dtype)), **(metadata or {})}
     # Keep a canonical nested parameter payload so callers can reject a same-
     # shape cache produced by a different window/preprocessing protocol.
     record.setdefault("parameters", dict(metadata or {}))
-    destination.with_suffix(".json").write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    metadata_path = destination.with_suffix(".json")
+    metadata_temporary = metadata_path.with_name(metadata_path.name + ".tmp")
+    metadata_temporary.write_text(json.dumps(record, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(metadata_temporary, metadata_path)
     return destination

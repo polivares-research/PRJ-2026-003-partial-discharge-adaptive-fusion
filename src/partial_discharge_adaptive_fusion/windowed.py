@@ -7,7 +7,11 @@ and are never assigned independent labels or split assignments.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable, Iterator
+import hashlib
+import json
+import os
 
 import numpy as np
 
@@ -110,6 +114,67 @@ def cwt_bag_batch(
     return transformed.astype(np.float32, copy=False)
 
 
+def standardizer_fingerprint(standardizer: Standardizer) -> str:
+    """Hash normalizer values so cache metadata detects changed statistics."""
+
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(standardizer.mean, dtype=np.float32).tobytes())
+    digest.update(np.ascontiguousarray(standardizer.std, dtype=np.float32).tobytes())
+    return digest.hexdigest()
+
+
+def load_or_fit_window_standardizer(
+    batches: Callable[[], Iterator[np.ndarray]],
+    spec: WindowSpec,
+    *,
+    representation: str,
+    destination: str,
+    expected_parameters: dict[str, object],
+    scales: np.ndarray = DEFAULT_SCALES,
+    time_bins: int = DEFAULT_CWT_TIME_BINS,
+    morlet_w0: float = DEFAULT_MORLET_W0,
+    floor: float = -10.0,
+) -> tuple[Standardizer, bool]:
+    """Reuse a train-only normalizer when its complete provenance matches."""
+
+    destination_path = Path(destination)
+    metadata_path = destination_path.with_suffix(".json")
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("parameters") != expected_parameters:
+            raise ValueError("standardizer parameters differ")
+        with np.load(destination_path, allow_pickle=False) as values:
+            standardizer = Standardizer(
+                mean=np.asarray(values["mean"], dtype=np.float32),
+                std=np.asarray(values["std"], dtype=np.float32),
+            )
+        if metadata.get("fingerprint") != standardizer_fingerprint(standardizer):
+            raise ValueError("standardizer fingerprint differs")
+        return standardizer, True
+    except (OSError, KeyError, ValueError, TypeError, json.JSONDecodeError):
+        pass
+
+    standardizer = fit_window_standardizer(
+        batches, spec, representation=representation, scales=scales,
+        time_bins=time_bins, morlet_w0=morlet_w0, floor=floor,
+    )
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination_path.with_name(destination_path.name + ".tmp")
+    with temporary.open("wb") as handle:
+        np.savez_compressed(handle, mean=standardizer.mean, std=standardizer.std)
+    os.replace(temporary, destination_path)
+    metadata = {
+        "parameters": expected_parameters,
+        "mean_shape": list(standardizer.mean.shape),
+        "std_shape": list(standardizer.std.shape),
+        "fingerprint": standardizer_fingerprint(standardizer),
+    }
+    metadata_temporary = metadata_path.with_name(metadata_path.name + ".tmp")
+    metadata_temporary.write_text(json.dumps(metadata, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(metadata_temporary, metadata_path)
+    return standardizer, False
+
+
 def windowed_cache_parameters(
     *,
     dataset_id: str,
@@ -124,11 +189,13 @@ def windowed_cache_parameters(
     floor: float = -10.0,
     sampling_frequency_hz: float | None = None,
     signal_length: int | None = None,
+    preprocessing_version: str = PREPROCESSING_VERSION,
+    source_provenance: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Return complete cache provenance, including preprocessing version."""
 
     parameters: dict[str, object] = {
-        "preprocessing_version": PREPROCESSING_VERSION,
+        "preprocessing_version": preprocessing_version,
         "dataset_id": dataset_id,
         "dataset_version": dataset_version,
         "partition": partition,
@@ -138,6 +205,10 @@ def windowed_cache_parameters(
         "standardizer_mean_shape": list(standardizer.mean.shape),
         "standardizer_std_shape": list(standardizer.std.shape),
     }
+    if preprocessing_version != PREPROCESSING_VERSION:
+        parameters["normalizer_fingerprint"] = standardizer_fingerprint(standardizer)
+        if source_provenance is not None:
+            parameters["source_provenance"] = source_provenance
     if representation == "cwt":
         scales = np.asarray(scales, dtype=np.float64)
         parameters.update({
@@ -172,6 +243,8 @@ def write_windowed_cache(
     floor: float = -10.0,
     sampling_frequency_hz: float | None = None,
     dtype: str = "float16",
+    preprocessing_version: str = PREPROCESSING_VERSION,
+    source_provenance: dict[str, object] | None = None,
 ) -> str:
     """Write one deterministic bag cache while reading raw signals sequentially."""
 
@@ -192,6 +265,7 @@ def write_windowed_cache(
         spec=spec, representation=representation, standardizer=standardizer,
         scales=scales, time_bins=time_bins, morlet_w0=morlet_w0, floor=floor,
         sampling_frequency_hz=sampling_frequency_hz, signal_length=signal_length,
+        preprocessing_version=preprocessing_version, source_provenance=source_provenance,
     )
     return str(write_stream_cache(
         batches, n_samples=n_samples, sample_shape=sample_shape, transform=transform,

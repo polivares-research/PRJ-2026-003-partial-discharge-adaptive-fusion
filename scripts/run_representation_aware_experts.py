@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import gc
 import json
+import time
 from pathlib import Path
 
 import numpy as np
@@ -26,9 +27,11 @@ from partial_discharge_adaptive_fusion.reporting import prediction_frame, write_
 from partial_discharge_adaptive_fusion.splits import assert_complete_oof, matlab_manifest, vsb_grouped_manifest
 from partial_discharge_adaptive_fusion.windowed import (
     DEFAULT_CWT_TIME_BINS, DEFAULT_MORLET_W0, fit_window_standardizer,
-    write_windowed_cache, windowed_cache_parameters,
+    load_or_fit_window_standardizer, write_windowed_cache, windowed_cache_parameters,
 )
-from partial_discharge_adaptive_fusion.windowing import SUMMARY_NAMES, WindowSpec, validate_parent_assignments
+from partial_discharge_adaptive_fusion.windowing import (
+    SUMMARY_NAMES, WindowSpec, expand_parent_metadata, validate_parent_assignments,
+)
 
 
 DATASET_VERSIONS = {MATLAB_DATASET_ID: "v1", VSB_DATASET_ID: "2018-kaggle-snapshot"}
@@ -84,16 +87,53 @@ def _prepare_caches(
     spec: WindowSpec,
     cache_root: Path,
     io_batch_size: int,
+    preprocessing_version: str = "representation-aware-mi-v1",
+    source_provenance: dict[str, object] | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
-    del io_batch_size, dataset  # I/O batching is already encoded in each factory.
-    temporal_standardizer = fit_window_standardizer(
-        raw_factories["train"], spec, representation="temporal",
-    )
-    cwt_standardizer = fit_window_standardizer(
-        raw_factories["train"], spec, representation="cwt", scales=CWT_SCALES,
-        time_bins=DEFAULT_CWT_TIME_BINS, morlet_w0=DEFAULT_MORLET_W0,
-    )
+    del dataset  # I/O batching is already encoded in each factory.
     root = cache_root / ("matlab" if dataset_id == MATLAB_DATASET_ID else "vsb")
+    sampling_frequency_hz = 40_000_000.0 if dataset_id == VSB_DATASET_ID else None
+    standardizer_root = root / str(spec.window_length) / "standardizers"
+    standardizer_base = {
+        "dataset_id": dataset_id, "dataset_version": dataset_version,
+        "fit_partition": "train", "window": spec.as_dict(
+            signal_length=signal_length, sampling_frequency_hz=sampling_frequency_hz,
+        ), "preprocessing_version": preprocessing_version,
+        "source_provenance": source_provenance or {},
+    }
+    timing = {"dataset_id": dataset_id, "preprocessing_version": preprocessing_version, "io_batch_size": io_batch_size, "splits": {}}
+    standardizer_started = time.perf_counter()
+    if preprocessing_version == "representation-aware-mi-v1":
+        temporal_standardizer = fit_window_standardizer(
+            raw_factories["train"], spec, representation="temporal",
+        )
+        cwt_standardizer = fit_window_standardizer(
+            raw_factories["train"], spec, representation="cwt", scales=CWT_SCALES,
+            time_bins=DEFAULT_CWT_TIME_BINS, morlet_w0=DEFAULT_MORLET_W0,
+        )
+        temporal_standardizer_hit = False
+        cwt_standardizer_hit = False
+    else:
+        temporal_standardizer, temporal_standardizer_hit = load_or_fit_window_standardizer(
+            raw_factories["train"], spec, representation="temporal",
+            destination=str(standardizer_root / "temporal.npz"),
+            expected_parameters={**standardizer_base, "representation": "temporal"},
+        )
+        cwt_standardizer, cwt_standardizer_hit = load_or_fit_window_standardizer(
+            raw_factories["train"], spec, representation="cwt",
+            destination=str(standardizer_root / "cwt.npz"),
+            expected_parameters={
+                **standardizer_base, "representation": "cwt",
+                "scales": CWT_SCALES.tolist(), "time_bins": DEFAULT_CWT_TIME_BINS,
+                "morlet_w0": DEFAULT_MORLET_W0,
+            }, scales=CWT_SCALES, time_bins=DEFAULT_CWT_TIME_BINS,
+            morlet_w0=DEFAULT_MORLET_W0,
+        )
+    timing["standardizers"] = {
+        "temporal_cache_hit": temporal_standardizer_hit,
+        "cwt_cache_hit": cwt_standardizer_hit,
+        "duration_seconds": time.perf_counter() - standardizer_started,
+    }
     prepared: dict[str, dict[str, np.ndarray]] = {}
     for split, frame in frames.items():
         split_root = root / str(spec.window_length)
@@ -101,7 +141,9 @@ def _prepare_caches(
         n_windows = spec.n_windows(signal_length)
         common = {
             "dataset_id": dataset_id, "dataset_version": dataset_version,
-            "sampling_frequency_hz": 40_000_000.0 if dataset_id == VSB_DATASET_ID else None,
+            "sampling_frequency_hz": sampling_frequency_hz,
+            "preprocessing_version": preprocessing_version,
+            "source_provenance": source_provenance or {},
         }
         temporal_parameters = windowed_cache_parameters(
             **common, partition=split, spec=spec, representation="temporal", standardizer=temporal_standardizer,
@@ -113,23 +155,43 @@ def _prepare_caches(
         )
         temporal_path = split_root / f"temporal-{split}.npy"
         cwt_path = split_root / f"cwt-{split}.npy"
+        if preprocessing_version != "representation-aware-mi-v1":
+            mapping_path = split_root / f"parent-window-map-{split}.parquet"
+            if not mapping_path.is_file():
+                mapping = expand_parent_metadata(
+                    frame["sample_id"].to_numpy(),
+                    frame.get("id_measurement", pd.Series(["none"] * len(frame))).astype(str).to_numpy(),
+                    np.repeat(split, len(frame)), n_windows=n_windows,
+                )
+                pd.DataFrame(mapping).to_parquet(mapping_path, index=False)
+            geometry_path = split_root / "window-geometry.json"
+            if not geometry_path.is_file():
+                geometry_path.write_text(
+                    json.dumps(spec.as_dict(signal_length=signal_length, sampling_frequency_hz=sampling_frequency_hz), indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+        split_started = time.perf_counter()
         temporal_shape = (len(frame), n_windows, 1, spec.window_length)
         cwt_shape = (len(frame), n_windows, 1, len(CWT_SCALES), DEFAULT_CWT_TIME_BINS)
-        if not _valid_cache(temporal_path, temporal_shape, temporal_parameters):
+        temporal_cache_hit = _valid_cache(temporal_path, temporal_shape, temporal_parameters)
+        cwt_cache_hit = _valid_cache(cwt_path, cwt_shape, cwt_parameters)
+        if not temporal_cache_hit:
             write_windowed_cache(
                 raw_factories[split], n_samples=len(frame), spec=spec, representation="temporal",
                 standardizer=temporal_standardizer, destination=str(temporal_path),
                 dataset_id=dataset_id, dataset_version=dataset_version, partition=split,
                 scales=CWT_SCALES, time_bins=DEFAULT_CWT_TIME_BINS,
                 sampling_frequency_hz=common["sampling_frequency_hz"], dtype="float16",
+                preprocessing_version=preprocessing_version, source_provenance=source_provenance,
             )
-        if not _valid_cache(cwt_path, cwt_shape, cwt_parameters):
+        if not cwt_cache_hit:
             write_windowed_cache(
                 raw_factories[split], n_samples=len(frame), spec=spec, representation="cwt",
                 standardizer=cwt_standardizer, destination=str(cwt_path),
                 dataset_id=dataset_id, dataset_version=dataset_version, partition=split,
                 scales=CWT_SCALES, time_bins=DEFAULT_CWT_TIME_BINS, morlet_w0=DEFAULT_MORLET_W0,
                 sampling_frequency_hz=common["sampling_frequency_hz"], dtype="float16",
+                preprocessing_version=preprocessing_version, source_provenance=source_provenance,
             )
         temporal = np.load(temporal_path, mmap_mode="r", allow_pickle=False)
         cwt = np.load(cwt_path, mmap_mode="r", allow_pickle=False)
@@ -143,9 +205,17 @@ def _prepare_caches(
             "temporal_standardizer_std": temporal_standardizer.std.tolist(),
             "cwt_standardizer_mean": cwt_standardizer.mean.tolist(),
             "cwt_standardizer_std": cwt_standardizer.std.tolist(),
-            "preprocessing_version": "representation-aware-mi-v1",
+            "preprocessing_version": preprocessing_version,
         }, split_root / "standardizers.json")
+        timing["splits"][split] = {
+            "temporal_cache_hit": temporal_cache_hit, "cwt_cache_hit": cwt_cache_hit,
+            "duration_seconds": time.perf_counter() - split_started,
+            "temporal_shape": list(temporal_shape), "cwt_shape": list(cwt_shape),
+            "estimated_bytes": int((np.prod(temporal_shape) + np.prod(cwt_shape)) * np.dtype("float16").itemsize),
+        }
         gc.collect()
+    if preprocessing_version != "representation-aware-mi-v1":
+        write_json(timing, root / str(spec.window_length) / "cache_timing.json")
     return prepared
 
 
@@ -250,10 +320,13 @@ def _run_dataset(args, config: dict, dataset_id: str) -> None:
         dataset_id=dataset_id, dataset_version=dataset_version, dataset=dataset,
         frames={key: frames[key] for key in ("train", "validation", "test", "test_historical") if key in frames},
         raw_factories=raw_factories, signal_length=signal_length, spec=spec,
-        cache_root=Path("results/cache/v3-windowed"), io_batch_size=args.io_batch_size,
+        cache_root=Path(config["outputs"].get("cache_root", "results/cache/v3-windowed")),
+        io_batch_size=args.io_batch_size, preprocessing_version=config.get("preprocessing_version", "representation-aware-mi-v1"),
+        source_provenance=config.get("data_source", {}),
     )
     train_manifest = manifest.frame.loc[manifest.frame["split"] == "train"].reset_index(drop=True)
     folds = train_manifest["oof_fold"].to_numpy(np.int64)
+    runtime = config.get("runtime", {})
     for seed in config["seeds"] if args.seeds is None else args.seeds:
         dataset_slug = "matlab" if dataset_id == MATLAB_DATASET_ID else "vsb"
         seed_root = Path(config["outputs"]["results_root"]) / dataset_slug / f"seed-{seed}"
@@ -272,11 +345,17 @@ def _run_dataset(args, config: dict, dataset_id: str) -> None:
             test_temporal=prepared["test"]["temporal"], test_cwt=prepared["test"]["cwt"],
             test_labels=test_labels, additional_tests=extra_tests, seed=int(seed), groups=groups,
             temporal_epochs=config["experts"]["epochs"]["temporal"], cwt_epochs=config["experts"]["epochs"]["cwt"],
+            temporal_kind=config["experts"].get("temporal_kind", "temporal"),
+            cwt_kind=config["experts"].get("cwt_kind", "cwt"),
             batch_size=config["experts"]["batch_size"], inference_batch_size=config["experts"].get("inference_batch_size", 4),
             gradient_accumulation_steps=config["experts"].get("gradient_accumulation_steps", 1),
             imbalance_strategy="fold_local_pos_weight" if dataset_id == VSB_DATASET_ID else "none",
             multi_instance=True, aggregation=spec.aggregation, top_k_fraction=spec.top_k_fraction,
             instance_microbatch_size=config["experts"].get("instance_microbatch_size", 32),
+            num_workers=int(runtime.get("num_workers", 0)),
+            persistent_workers=bool(runtime.get("persistent_workers", False)),
+            prefetch_factor=int(runtime.get("prefetch_factor", 2)),
+            mixed_precision=bool(runtime.get("mixed_precision", False)),
         )
         rows = [
             prediction_frame(
@@ -321,7 +400,7 @@ def _run_dataset(args, config: dict, dataset_id: str) -> None:
                 ),
                 "signal_length": signal_length, "cwt_scales": CWT_SCALES.tolist(),
                 "cwt_time_bins": DEFAULT_CWT_TIME_BINS, "morlet_w0": DEFAULT_MORLET_W0,
-                "preprocessing_version": "representation-aware-mi-v1",
+                "preprocessing_version": config.get("preprocessing_version", "representation-aware-mi-v1"),
             },
             "multi_instance": {"loss_unit": "parent_signal", "instance_microbatch_size": config["experts"].get("instance_microbatch_size", 32)},
             "temporal_histories": output.temporal_histories, "cwt_histories": output.cwt_histories,

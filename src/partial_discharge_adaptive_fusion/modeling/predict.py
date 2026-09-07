@@ -38,6 +38,7 @@ def _collect_logits_and_summaries(
     loader: DataLoader,
     *,
     return_window_summary: bool,
+    mixed_precision: bool = False,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     device = require_cuda()
     model.eval()
@@ -46,15 +47,16 @@ def _collect_logits_and_summaries(
     with torch.inference_mode():
         for batch in loader:
             batch_x = batch[0] if isinstance(batch, (tuple, list)) else batch
-            output = model(batch_x.to(device, non_blocking=True), return_window_summary=return_window_summary)
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=mixed_precision):
+                output = model(batch_x.to(device, non_blocking=True), return_window_summary=return_window_summary)
             if return_window_summary:
                 batch_logits, batch_summary = output
             else:
                 batch_logits, batch_summary = output, {}
-            logits.append(batch_logits.detach().cpu().numpy())
+            logits.append(batch_logits.detach().float().cpu().numpy())
             for name in SUMMARY_NAMES:
                 if name in batch_summary:
-                    summaries[name].append(batch_summary[name].detach().cpu().numpy())
+                    summaries[name].append(batch_summary[name].detach().float().cpu().numpy())
     result = np.concatenate(logits).astype(np.float64)
     return result, {
         name: np.concatenate(chunks).astype(np.float64)
@@ -69,6 +71,7 @@ def logits_for_array(
     *,
     batch_size: int = 512,
     multi_instance: bool = False,
+    mixed_precision: bool = False,
 ) -> np.ndarray:
     """Run bounded inference on CUDA and return CPU NumPy logits."""
 
@@ -78,7 +81,8 @@ def logits_for_array(
     output = []
     with torch.inference_mode():
         for batch in loader:
-            output.append(model(batch.to(device, non_blocking=True)).detach().cpu().numpy())
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=mixed_precision):
+                output.append(model(batch.to(device, non_blocking=True)).detach().float().cpu().numpy())
     return np.concatenate(output).astype(np.float64)
 
 
@@ -89,6 +93,7 @@ def logits_for_indices(
     *,
     batch_size: int = 512,
     multi_instance: bool = False,
+    mixed_precision: bool = False,
 ) -> np.ndarray:
     """Run inference on selected rows without materializing a memmap subset."""
 
@@ -100,7 +105,8 @@ def logits_for_indices(
     output = []
     with torch.inference_mode():
         for batch in loader:
-            output.append(model(batch.to(device, non_blocking=True)).detach().cpu().numpy())
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=mixed_precision):
+                output.append(model(batch.to(device, non_blocking=True)).detach().float().cpu().numpy())
     return np.concatenate(output).astype(np.float64)
 
 
@@ -109,12 +115,15 @@ def logits_and_window_summaries_for_array(
     values: np.ndarray,
     *,
     batch_size: int = 512,
+    mixed_precision: bool = False,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     """Return signal-level logits and diagnostic window statistics."""
 
     require_cuda()
     loader = _prediction_loader(np.asarray(values), None, batch_size=batch_size, multi_instance=True)
-    return _collect_logits_and_summaries(model, loader, return_window_summary=True)
+    return _collect_logits_and_summaries(
+        model, loader, return_window_summary=True, mixed_precision=mixed_precision,
+    )
 
 
 def logits_and_window_summaries_for_indices(
@@ -123,10 +132,13 @@ def logits_and_window_summaries_for_indices(
     indices: np.ndarray,
     *,
     batch_size: int = 512,
+    mixed_precision: bool = False,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
     """Predict selected parent signals while retaining one summary per signal."""
 
     loader = _prediction_loader(
         values, np.asarray(indices, dtype=np.int64), batch_size=batch_size, multi_instance=True,
     )
-    return _collect_logits_and_summaries(model, loader, return_window_summary=True)
+    return _collect_logits_and_summaries(
+        model, loader, return_window_summary=True, mixed_precision=mixed_precision,
+    )

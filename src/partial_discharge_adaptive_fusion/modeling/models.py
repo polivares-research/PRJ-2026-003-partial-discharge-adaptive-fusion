@@ -45,6 +45,95 @@ class SmallCWT2DCNN(nn.Module):
         return (logits, embedding) if return_embedding else logits
 
 
+class _ResidualTemporalBlock(nn.Module):
+    """Compact residual block used by the V4 geometry-adapted temporal expert."""
+
+    def __init__(self, channels: int, dilation: int) -> None:
+        super().__init__()
+        padding = dilation * 3
+        self.block = nn.Sequential(
+            nn.Conv1d(channels, channels, 7, padding=padding, dilation=dilation),
+            nn.BatchNorm1d(channels), nn.GELU(),
+            nn.Conv1d(channels, channels, 3, padding=dilation, dilation=dilation),
+            nn.BatchNorm1d(channels),
+        )
+        self.activation = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.activation(x + self.block(x))
+
+
+class V4MultiScaleTemporalCNN(nn.Module):
+    """Geometry-adapted temporal encoder with local and coarse context."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv1d(1, 32, 9, padding=4), nn.BatchNorm1d(32), nn.GELU(),
+        )
+        self.local = nn.Sequential(
+            _ResidualTemporalBlock(32, 1), _ResidualTemporalBlock(32, 2),
+            nn.AdaptiveAvgPool1d(1),
+        )
+        self.coarse = nn.Sequential(
+            _ResidualTemporalBlock(32, 1), _ResidualTemporalBlock(32, 4),
+            nn.AdaptiveAvgPool1d(1),
+        )
+        self.classifier = nn.Sequential(nn.Linear(64, 32), nn.GELU(), nn.Linear(32, 1))
+
+    def forward(self, x, return_embedding: bool = False):
+        if x.ndim != 3 or x.shape[-1] < 4:
+            raise ValueError(f"Expected [batch, 1, time] with time >= 4, got {tuple(x.shape)}")
+        stem = self.stem(x)
+        local = self.local(stem).squeeze(-1)
+        coarse_input = nn.functional.avg_pool1d(stem, kernel_size=4, stride=4)
+        coarse = self.coarse(coarse_input).squeeze(-1)
+        embedding = torch.cat((local, coarse), dim=1)
+        logits = self.classifier(embedding).squeeze(-1)
+        return (logits, embedding) if return_embedding else logits
+
+
+class _ResidualCWTBlock(nn.Module):
+    """Residual block for the V4 CWT expert."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(channels, channels, 3, padding=1), nn.BatchNorm2d(channels), nn.GELU(),
+            nn.Conv2d(channels, channels, 3, padding=1), nn.BatchNorm2d(channels),
+        )
+        self.activation = nn.GELU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.activation(x + self.block(x))
+
+
+class V4ResidualCWT2DCNN(nn.Module):
+    """Compact residual CWT encoder retaining the V3 Morlet representation."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv2d(1, 24, 3, padding=1), nn.BatchNorm2d(24), nn.GELU(), nn.MaxPool2d(2),
+        )
+        self.blocks = nn.Sequential(
+            _ResidualCWTBlock(24), nn.MaxPool2d(2),
+            nn.Conv2d(24, 48, 3, padding=1), nn.BatchNorm2d(48), nn.GELU(),
+            _ResidualCWTBlock(48), nn.AdaptiveAvgPool2d(1),
+        )
+        self.classifier = nn.Sequential(nn.Linear(48, 24), nn.GELU(), nn.Linear(24, 1))
+
+    def forward(self, x, return_embedding: bool = False):
+        if x.ndim != 4 or min(x.shape[-2:]) < 4:
+            raise ValueError(
+                "Expected [batch, 1, scales, time] with dimensions >= 4, "
+                f"got {tuple(x.shape)}"
+            )
+        embedding = self.blocks(self.stem(x)).flatten(1)
+        logits = self.classifier(embedding).squeeze(-1)
+        return (logits, embedding) if return_embedding else logits
+
+
 def make_expert(kind: str) -> nn.Module:
     """Construct an expert by its frozen representation name."""
 
@@ -52,6 +141,10 @@ def make_expert(kind: str) -> nn.Module:
         return TinyTemporalCNN()
     if kind == "cwt":
         return SmallCWT2DCNN()
+    if kind in {"v4_temporal", "geometry_adapted_temporal"}:
+        return V4MultiScaleTemporalCNN()
+    if kind in {"v4_cwt", "geometry_adapted_cwt"}:
+        return V4ResidualCWT2DCNN()
     raise ValueError(f"Unknown expert kind: {kind}")
 
 

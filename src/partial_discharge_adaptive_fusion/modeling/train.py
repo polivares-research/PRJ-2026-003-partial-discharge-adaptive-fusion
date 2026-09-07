@@ -65,6 +65,10 @@ def train_expert(
     aggregation: str = "top_k_mean",
     top_k_fraction: float = 0.10,
     instance_microbatch_size: int = 32,
+    num_workers: int = 0,
+    persistent_workers: bool = False,
+    prefetch_factor: int = 2,
+    mixed_precision: bool = False,
 ) -> TrainingResult:
     """Train one expert on CUDA and select the epoch using validation MCC."""
 
@@ -75,6 +79,10 @@ def train_expert(
         raise ValueError("Validation batch size must be positive.")
     if gradient_accumulation_steps < 1:
         raise ValueError("Gradient accumulation steps must be positive.")
+    if num_workers < 0 or prefetch_factor < 1:
+        raise ValueError("num_workers must be non-negative and prefetch_factor must be positive.")
+    if num_workers == 0 and persistent_workers:
+        raise ValueError("persistent_workers requires num_workers > 0.")
     set_seed(seed)
     model = (
         make_multi_instance_expert(
@@ -93,13 +101,17 @@ def train_expert(
         else np.asarray(validation_y)[np.asarray(validation_indices, dtype=np.int64)]
     )
     generator = torch.Generator().manual_seed(seed)
+    loader_options = {"num_workers": num_workers, "pin_memory": True}
+    validation_options = {"num_workers": num_workers, "pin_memory": True}
+    if num_workers:
+        loader_options.update({"persistent_workers": persistent_workers, "prefetch_factor": prefetch_factor})
+        validation_options.update({"persistent_workers": persistent_workers, "prefetch_factor": prefetch_factor})
     loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, generator=generator,
-        num_workers=0, pin_memory=True,
+        train_dataset, batch_size=batch_size, shuffle=True, generator=generator, **loader_options,
     )
     validation_loader = DataLoader(
         validation_dataset, batch_size=validation_batch_size or max(batch_size, 512), shuffle=False,
-        num_workers=0, pin_memory=True,
+        **validation_options,
     )
     weight = torch.tensor([pos_weight], device=device) if pos_weight is not None else None
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=weight)
@@ -116,13 +128,14 @@ def train_expert(
         for batch_number, (batch_x, batch_y) in enumerate(loader, start=1):
             batch_x = batch_x.to(device, non_blocking=True)
             batch_y = batch_y.to(device, non_blocking=True)
-            loss = loss_fn(model(batch_x), batch_y) / gradient_accumulation_steps
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=mixed_precision):
+                loss = loss_fn(model(batch_x), batch_y) / gradient_accumulation_steps
             loss.backward()
             if batch_number % gradient_accumulation_steps == 0 or batch_number == len(loader):
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             losses.append(float(loss.detach().cpu()))
-        validation_logits = predict_logits(model, validation_loader, device)
+        validation_logits = predict_logits(model, validation_loader, device, mixed_precision=mixed_precision)
         validation_mcc = _mcc(selection_labels, validation_logits >= 0.0)
         history.append({"epoch": float(epoch), "train_loss": float(np.mean(losses)), "val_mcc_at_0.5": validation_mcc})
         if validation_mcc > best_mcc + 1e-12:
@@ -141,7 +154,7 @@ def train_expert(
     return TrainingResult(model=model, history=history, best_epoch=best_epoch)
 
 
-def predict_logits(model: nn.Module, loader: DataLoader, device=None) -> np.ndarray:
+def predict_logits(model: nn.Module, loader: DataLoader, device=None, *, mixed_precision: bool = False) -> np.ndarray:
     """Predict logits with explicit CUDA placement."""
 
     device = device or require_cuda()
@@ -150,7 +163,9 @@ def predict_logits(model: nn.Module, loader: DataLoader, device=None) -> np.ndar
     with torch.inference_mode():
         for batch in loader:
             batch_x = batch[0] if isinstance(batch, (tuple, list)) else batch
-            values.append(model(batch_x.to(device, non_blocking=True)).detach().cpu().numpy())
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16, enabled=mixed_precision):
+                output = model(batch_x.to(device, non_blocking=True))
+            values.append(output.detach().float().cpu().numpy())
     return np.concatenate(values).astype(np.float64)
 
 
@@ -200,6 +215,10 @@ def cross_fitted_logits(
     aggregation: str = "top_k_mean",
     top_k_fraction: float = 0.10,
     instance_microbatch_size: int = 32,
+    num_workers: int = 0,
+    persistent_workers: bool = False,
+    prefetch_factor: int = 2,
+    mixed_precision: bool = False,
 ) -> CrossFitResult:
     """Generate leakage-safe OOF logits with fold-local validation.
 
@@ -256,12 +275,17 @@ def cross_fitted_logits(
             aggregation=aggregation,
             top_k_fraction=top_k_fraction,
             instance_microbatch_size=instance_microbatch_size,
+            num_workers=num_workers,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
+            mixed_precision=mixed_precision,
         )
         if multi_instance:
             from .predict import logits_and_window_summaries_for_indices
 
             fold_logits, fold_summaries = logits_and_window_summaries_for_indices(
                 result.model, inputs, holdout, batch_size=prediction_batch_size,
+                mixed_precision=mixed_precision,
             )
             for name, values in fold_summaries.items():
                 window_summaries.setdefault(name, np.full(len(labels), np.nan, dtype=np.float64))
@@ -271,6 +295,7 @@ def cross_fitted_logits(
 
             fold_logits = logits_for_indices(
                 result.model, inputs, holdout, batch_size=prediction_batch_size,
+                mixed_precision=mixed_precision,
             )
         logits[holdout] = fold_logits
         histories[int(fold)] = result.history
