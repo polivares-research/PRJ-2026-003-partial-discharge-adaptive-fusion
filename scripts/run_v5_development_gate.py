@@ -11,7 +11,7 @@ from partial_discharge_adaptive_fusion.logging_utils import configure_progress_l
 from partial_discharge_adaptive_fusion.protocol import load_experiment_config
 from partial_discharge_adaptive_fusion.reporting import write_json
 from partial_discharge_adaptive_fusion.v5_protocol import (
-    V5_DEVELOPMENT_SEEDS, V5GateDecision, assert_v5_holdouts_closed,
+    V5_CANDIDATE_IDS, V5_DEVELOPMENT_SEEDS, V5GateDecision, assert_v5_holdouts_closed,
     gate_decision, select_v5_candidate,
 )
 
@@ -24,6 +24,16 @@ def evaluate_gate(config_path: Path, records_path: Path, logger) -> dict:
     document = json.loads(records_path.read_text(encoding="utf-8"))
     if document.get("holdouts_opened") is not False:
         raise RuntimeError("Input records do not prove that V5 holdouts stayed closed")
+    unavailable = document.get("unavailable_candidates", {})
+    observed_candidates = set(document.get("candidates", {})) | set(unavailable)
+    missing_candidates = set(V5_CANDIDATE_IDS) - observed_candidates
+    if missing_candidates:
+        raise RuntimeError(f"V5 records do not account for candidates: {sorted(missing_candidates)}")
+    if unavailable:
+        logger.warning(
+            "V5 candidate set is incomplete; unavailable candidates="
+            + ",".join(sorted(unavailable))
+        )
     decisions: dict[str, V5GateDecision] = {}
     seed_records: dict[str, list[dict]] = {}
     for candidate_id, payload in document.get("candidates", {}).items():
@@ -40,9 +50,11 @@ def evaluate_gate(config_path: Path, records_path: Path, logger) -> dict:
     if not decisions:
         raise RuntimeError("No candidate records were supplied")
     selected = None
-    if any(decision.status == "PASS" for decision in decisions.values()):
+    if not unavailable and any(decision.status == "PASS" for decision in decisions.values()):
         selected = select_v5_candidate(decisions.values()).candidate_id
         logger.info(f"candidate selected: {selected}")
+    elif unavailable:
+        logger.info("candidate selection blocked until all predeclared candidates are available")
     else:
         logger.info("no candidate passed; holdouts remain closed")
     logger.info(f"gate finished in {time.perf_counter() - started:.1f}s")
@@ -50,7 +62,11 @@ def evaluate_gate(config_path: Path, records_path: Path, logger) -> dict:
         "protocol_version": "v5-pulse-aware-v1", "holdouts_opened": False,
         "candidate_decisions": {key: value.__dict__ for key, value in decisions.items()},
         "seed_records": seed_records, "selected_candidate": selected,
-        "gate_status": "PASS" if selected else "STOP_OR_REVIEW",
+        "gate_status": (
+            "PASS" if selected else
+            "INCOMPLETE_CANDIDATE_SET" if unavailable else "STOP_OR_REVIEW"
+        ),
+        "unavailable_candidates": unavailable,
     }
 
 
