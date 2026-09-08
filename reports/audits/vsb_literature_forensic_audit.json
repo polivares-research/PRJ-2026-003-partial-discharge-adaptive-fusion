@@ -14,13 +14,23 @@
     "status": "VALID"
   },
   "audit_version": "vsb-literature-forensic-v1",
-  "baseline_best_development_mcc": 0.7216047914882997,
+  "baseline_best_development_mcc": 0.632049896620652,
   "config": "configs/experiments/vsb-literature-forensic-audit-localraw.yaml",
   "domain_shift": {
     "n_features": 153,
     "n_rows": 6972,
     "protocol": "group-aware five-fold domain classifier",
     "roc_auc": 0.49750755611029757
+  },
+  "grouped_phase_independent_summary": {
+    "classifier": "hist_gradient_boosting",
+    "mean_mcc": 0.6261864547298231,
+    "minimum_seed_mcc": 0.6194280719688356,
+    "per_seed_mcc": {
+      "42": 0.627081395599982,
+      "43": 0.632049896620652,
+      "44": 0.6194280719688356
+    }
   },
   "holdouts": {
     "matlab_te2": "LOCKED",
