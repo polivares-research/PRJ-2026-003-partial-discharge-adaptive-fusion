@@ -434,12 +434,21 @@ def stage_report(root: Path, report_root: Path, figure_root: Path, config_path: 
         try:
             raw = item.get("metrics", "")
             metrics = json.loads(raw) if isinstance(raw, str) and raw.startswith("{") else ast.literal_eval(raw)
-            rows.append({"classifier": item.get("classifier"), "seed": int(item.get("seed")), "mode": item.get("mode"), "feature_family": item.get("feature_family"), "mcc": float(metrics.get("mcc", np.nan)), "roc_auc": float(metrics.get("roc_auc", np.nan))})
+            rows.append({"classifier": item.get("classifier"), "seed": int(item.get("seed")), "grouped": bool(item.get("grouped", False)), "diagnostic_protocol": item.get("diagnostic_protocol"), "mode": item.get("mode"), "feature_family": item.get("feature_family"), "mcc": float(metrics.get("mcc", np.nan)), "roc_auc": float(metrics.get("roc_auc", np.nan))})
         except (ValueError, SyntaxError, TypeError, json.JSONDecodeError):
             pass
     best = pd.DataFrame(rows)
-    grouped = best[(best["mode"] == "phase_independent") & (best["feature_family"] == "detectors_plus_cwt")] if len(best) else best
+    grouped = best[(best["mode"] == "phase_independent") & (best["feature_family"] == "detectors_plus_cwt") & (best["grouped"] == True) & (best["diagnostic_protocol"].isna())] if len(best) else best
     best_mcc = float(grouped["mcc"].max()) if len(grouped) else float("nan")
+    if len(grouped):
+        classifier_means = grouped.groupby("classifier")["mcc"].mean().sort_values(ascending=False)
+        selected_classifier = str(classifier_means.index[0])
+        selected = grouped[grouped["classifier"] == selected_classifier]
+        grouped_mean_mcc = float(selected["mcc"].mean())
+        grouped_min_mcc = float(selected["mcc"].min())
+        grouped_seed_mcc = {str(int(seed)): float(value) for seed, value in selected.groupby("seed")["mcc"].mean().items()}
+    else:
+        selected_classifier, grouped_mean_mcc, grouped_min_mcc, grouped_seed_mcc = "unavailable", float("nan"), float("nan"), {}
     integrity_pass = integrity.get("integrity_status") == "PASS"
     alignment_status = alignment.get("status", "UNAVAILABLE")
     if not integrity_pass:
@@ -479,6 +488,7 @@ def stage_report(root: Path, report_root: Path, figure_root: Path, config_path: 
         "literature": literature,
         "alignment": alignment,
         "baseline_best_development_mcc": best_mcc,
+        "grouped_phase_independent_summary": {"classifier": selected_classifier, "mean_mcc": grouped_mean_mcc, "minimum_seed_mcc": grouped_min_mcc, "per_seed_mcc": grouped_seed_mcc},
         "domain_shift": domain,
         "morphology": morphology,
         "stages": {stage: is_complete(root, stage) for stage in ("literature", "integrity", "scan", "morphology", "cwt", "baseline")},
@@ -506,6 +516,7 @@ Final audit decision: {verdict}. This is a development-only diagnostic, not V6, 
 - Mixed-label measurements: {integrity.get("label_summary", {}).get("mixed_label_measurements", "UNAVAILABLE")}
 - Alignment status: {alignment_status}
 - Best grouped phase-independent diagnostic MCC: {best_mcc:.4f}
+- Selected group-safe classifier: {selected_classifier}; mean MCC across seeds: {grouped_mean_mcc:.4f}; minimum seed MCC: {grouped_min_mcc:.4f}
 
 ### Three-phase patterns
 
@@ -517,7 +528,7 @@ Final audit decision: {verdict}. This is a development-only diagnostic, not V6, 
 
 ## Interpretation
 
-The primary unit is the original phase signal. Grouped train/validation partitions preserve id_measurement. Measurement-aware and any-positive measurement diagnostics are secondary and do not replace the signal-level target. Random signal-level splits are intentionally optimistic and are not deployable evidence.
+The primary unit is the original phase signal. Grouped train/validation partitions preserve id_measurement. Measurement-aware and any-positive measurement diagnostics are secondary and do not replace the signal-level target. The reported decision MCC excludes rows with grouped=False and diagnostic_protocol=random_signal_level_split. Random signal-level splits are intentionally optimistic and are not deployable evidence.
 
 Phase-derived quantities are called electrical phase only when the predeclared alignment criteria pass. Otherwise they are normalized temporal positions. The detector and CWT settings marked as project literature anchors are adaptations, not exact reproductions. The CWT output is bounded event summaries, not a full scalogram cache.
 
