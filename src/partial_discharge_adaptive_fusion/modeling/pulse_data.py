@@ -17,18 +17,18 @@ class PulseBagDataset(Dataset):
         labels: np.ndarray | None = None,
         indices: np.ndarray | None = None,
     ) -> None:
-        values = np.asarray(values)
-        valid_mask = np.asarray(valid_mask, dtype=bool)
-        if values.ndim < 4 or values.shape[0] != len(valid_mask):
+        shape = getattr(values, "shape", None)
+        mask_shape = getattr(valid_mask, "shape", None)
+        if shape is None or mask_shape is None or len(shape) < 4 or shape[0] != mask_shape[0]:
             raise ValueError("Pulse values must be [signals, halves, pulses, ...] and align with masks")
-        if valid_mask.ndim != 3 or valid_mask.shape[:2] != values.shape[:2]:
+        if len(mask_shape) != 3 or tuple(mask_shape[:2]) != tuple(shape[:2]):
             raise ValueError("Pulse validity masks must be [signals, halves, pulses]")
-        if labels is not None and len(labels) != len(values):
+        if labels is not None and len(labels) != shape[0]:
             raise ValueError("Pulse labels must align with parent signals")
         self.values = values
         self.valid_mask = valid_mask
         self.labels = None if labels is None else np.asarray(labels, dtype=np.float32)
-        self.indices = np.arange(len(values), dtype=np.int64) if indices is None else np.asarray(indices)
+        self.indices = np.arange(shape[0], dtype=np.int64) if indices is None else np.asarray(indices)
 
     def __len__(self) -> int:
         return len(self.indices)

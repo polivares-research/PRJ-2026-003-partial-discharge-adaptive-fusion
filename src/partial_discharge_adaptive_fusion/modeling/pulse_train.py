@@ -58,6 +58,15 @@ def _loader(
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, **options)
 
 
+def shutdown_pulse_loader(loader: DataLoader) -> None:
+    """Release persistent worker pipes after one short-lived training stage."""
+
+    iterator = getattr(loader, "_iterator", None)
+    shutdown = getattr(iterator, "_shutdown_workers", None)
+    if callable(shutdown):
+        shutdown()
+
+
 def train_pulse_expert(
     values: np.ndarray,
     valid_mask: np.ndarray,
@@ -145,7 +154,10 @@ def train_pulse_expert(
         raise RuntimeError("No pulse expert checkpoint was produced")
     model.load_state_dict(best_state)
     model.eval().to(device)
-    return PulseTrainingResult(model=model, history=history, best_epoch=best_epoch)
+    output = PulseTrainingResult(model=model, history=history, best_epoch=best_epoch)
+    shutdown_pulse_loader(train_loader)
+    shutdown_pulse_loader(validation_loader)
+    return output
 
 
 def predict_pulse_logits(model: PulseBagExpert, loader: DataLoader, device=None, *, mixed_precision: bool = False) -> np.ndarray:
@@ -229,7 +241,8 @@ def cross_fitted_pulse_logits(
         )
         logits[holdout] = predict_pulse_logits(result.model, loader, mixed_precision=mixed_precision)
         histories[int(fold)] = result.history
-        del result
+        shutdown_pulse_loader(loader)
+        del result, loader
         gc.collect()
         torch.cuda.empty_cache()
     if not np.isfinite(logits).all():
