@@ -1,0 +1,359 @@
+{
+  "alignment": {
+    "all_method_success_rate": 0.9899598393574297,
+    "complete_measurement_rate": 1.0,
+    "forced_120_degree_relation": false,
+    "maximum_disagreement_degrees": 20.0,
+    "median_disagreement_degrees": 1.7667000000000144,
+    "method_success_rates": {
+      "dft_sinusoid": 0.9992828456683879,
+      "dualcycon_strict": 0.9902467010900746,
+      "v5_current": 1.0
+    },
+    "minimum_success_rate": 0.95,
+    "status": "VALID"
+  },
+  "audit_version": "vsb-literature-forensic-v1",
+  "baseline_best_development_mcc": 0.632049896620652,
+  "config": "configs/experiments/vsb-literature-forensic-audit-localraw.yaml",
+  "domain_shift": {
+    "n_features": 153,
+    "n_rows": 6972,
+    "protocol": "group-aware five-fold domain classifier",
+    "roc_auc": 0.49750755611029757
+  },
+  "grouped_phase_independent_summary": {
+    "classifier": "hist_gradient_boosting",
+    "mean_mcc": 0.6261864547298231,
+    "minimum_seed_mcc": 0.6194280719688356,
+    "per_seed_mcc": {
+      "42": 0.627081395599982,
+      "43": 0.632049896620652,
+      "44": 0.6194280719688356
+    }
+  },
+  "holdouts": {
+    "matlab_te2": "LOCKED",
+    "official_unlabeled_test": "LOCKED",
+    "vsb_grouped_test": "LOCKED"
+  },
+  "integrity": {
+    "holdout_policy": {
+      "development_signal_rows_loaded": 6972,
+      "matlab_te2_loaded": false,
+      "official_unlabeled_test_loaded": false,
+      "test_signal_rows_loaded": 0
+    },
+    "integrity_status": "PASS",
+    "label_summary": {
+      "all_positive_measurements": 156,
+      "any_positive_measurements": 194,
+      "literature_discrepancy": {
+        "audit_any_positive_measurements": 194,
+        "literature_measurement_positive_anchor": 575,
+        "repository_positive_phase_signals": 525
+      },
+      "measurements": 2904,
+      "mixed_label_measurements": 38,
+      "positive_signals": 525,
+      "signals": 8712
+    },
+    "metadata": {
+      "groups_with_mixed_labels": 38,
+      "groups_with_three_distinct_phases": 2904,
+      "groups_with_unexpected_phase_count": 0,
+      "groups_with_unexpected_row_count": 0,
+      "label_counts": {
+        "0": 8187,
+        "1": 525
+      },
+      "mixed_label_groups": [
+        "1068",
+        "1076",
+        "1091",
+        "1132",
+        "1256",
+        "126",
+        "1268",
+        "1277",
+        "1304",
+        "1420",
+        "1537",
+        "1561",
+        "159",
+        "1668",
+        "1704",
+        "1884",
+        "1899",
+        "1994",
+        "2328",
+        "2623",
+        "2693",
+        "271",
+        "2753",
+        "2760",
+        "2807",
+        "2876",
+        "301",
+        "443",
+        "518",
+        "601",
+        "608",
+        "620",
+        "67",
+        "706",
+        "894",
+        "944",
+        "96",
+        "988"
+      ],
+      "n_measurements": 2904,
+      "n_signals": 8712,
+      "phase_values": [
+        "0",
+        "1",
+        "2"
+      ]
+    },
+    "metadata_columns": [
+      "signal_id",
+      "id_measurement",
+      "phase",
+      "target",
+      "sample_id",
+      "group_id",
+      "split",
+      "oof_fold"
+    ],
+    "parquet_schema": {
+      "column_type_counts": {
+        "int8": 8712
+      },
+      "num_columns": 8712,
+      "num_row_groups": 1,
+      "num_rows": 800000
+    },
+    "provenance": {
+      "audit_version": "vsb-literature-forensic-v1",
+      "config_fingerprint": {
+        "path": "configs/experiments/vsb-literature-forensic-audit-localraw.yaml",
+        "sha256": "b1fb66d3216c81e23bd05653b933b2c5c1080f1ffac9abf4ff30040acc3fd2c3",
+        "size_bytes": 2640
+      },
+      "data_contract": "local_raw/PD_RAW_DATA_ROOT",
+      "dataset": {
+        "dataset_id": "engineering-vsb-power-line-fault-detection",
+        "files": [
+          {
+            "file_id": "vsb-train-parquet",
+            "relative_path": "dataset-vsb-power-line-fault-detection/train.parquet",
+            "required": true,
+            "resolved_exists": true,
+            "size_bytes": 3811038936
+          },
+          {
+            "file_id": "vsb-test-parquet",
+            "relative_path": "dataset-vsb-power-line-fault-detection/test.parquet",
+            "required": false,
+            "resolved_exists": true,
+            "size_bytes": 8806571365
+          },
+          {
+            "file_id": "vsb-train-parquet-zip",
+            "relative_path": "dataset-vsb-power-line-fault-detection/train.parquet.zip",
+            "required": false,
+            "resolved_exists": false
+          },
+          {
+            "file_id": "vsb-test-parquet-zip",
+            "relative_path": "dataset-vsb-power-line-fault-detection/test.parquet.zip",
+            "required": false,
+            "resolved_exists": false
+          },
+          {
+            "file_id": "vsb-metadata-train",
+            "observed_sha256": "c7f4b00e867259870c5381b5da9ba23b878ae9b907e75140e70f953c611b053a",
+            "relative_path": "dataset-vsb-power-line-fault-detection/metadata_train.csv",
+            "required": true,
+            "resolved_exists": true,
+            "size_bytes": 117566
+          },
+          {
+            "file_id": "vsb-metadata-test",
+            "observed_sha256": "b08a356c4e5ac815e9ebd734f563fdc5073415cf13516fd4ee1ea5a8844fb034",
+            "relative_path": "dataset-vsb-power-line-fault-detection/metadata_test.csv",
+            "required": false,
+            "resolved_exists": true,
+            "size_bytes": 263124
+          },
+          {
+            "file_id": "vsb-sample-submission",
+            "observed_sha256": "5bd8a8e3615269d021b04e7bc00f39db47cbef4c9a7e422c7ea1053ddadd0112",
+            "relative_path": "dataset-vsb-power-line-fault-detection/sample_submission.csv",
+            "required": false,
+            "resolved_exists": true,
+            "size_bytes": 161425
+          },
+          {
+            "file_id": "vsb-source-metadata",
+            "observed_sha256": "66ed424996fabc6b0b86498ef422c62fb71efe2c31c328fc5d7a7f3e8d0d5264",
+            "relative_path": "dataset-vsb-power-line-fault-detection/source_metadata.yaml",
+            "required": false,
+            "resolved_exists": true,
+            "size_bytes": 2284
+          }
+        ],
+        "version": "2018-kaggle-snapshot"
+      },
+      "dropbox": "forbidden",
+      "historical_inputs": [
+        {
+          "files": [
+            {
+              "path": "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/reports/metrics/v5-pulse-aware/development_gate.json",
+              "sha256": "cac386a9722a5befba74a2b50f8ac37a6223ef1b8fadba3fb6c979a2f0588548",
+              "size_bytes": 6190
+            }
+          ],
+          "path": "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/reports/metrics/v5-pulse-aware"
+        },
+        {
+          "path": "/home/polivares/Research/projects/PRJ-2026-003-partial-discharge-adaptive-fusion/results/manifests/matlab_manifest_v3_windowed.csv",
+          "sha256": "d95ae75b79aaa1f4e946922605eb973109208e4070595785a3882b74ded4e7e2",
+          "size_bytes": 76895780
+        }
+      ],
+      "metadata_fingerprint": "46127855bf5fd63f7e200a97c389534a24c9733cc4d536dc93807e11730044fd",
+      "researchdata": "forbidden"
+    },
+    "sample_signal": {
+      "dtype": "float32",
+      "duration_seconds": 0.02,
+      "finite": true,
+      "maximum": 39.0,
+      "minimum": -39.0,
+      "sampling_frequency_hz": 40000000.0,
+      "shape": [
+        3,
+        800000
+      ]
+    },
+    "split_summary": {
+      "development_measurement_count": 2324,
+      "development_signal_count": 6972,
+      "group_isolation_status": "PASS",
+      "holdout_rows_seen_by_audit": 1740,
+      "manifest_fingerprint": "234be431f062fe2058d3c5d4a7508b39eb4ce5f6fb55dfa49b68c81554ad78c7",
+      "split_counts": {
+        "test": {
+          "measurements": 580,
+          "positive_signals": 106,
+          "signals": 1740
+        },
+        "train": {
+          "measurements": 1743,
+          "positive_signals": 313,
+          "signals": 5229
+        },
+        "validation": {
+          "measurements": 581,
+          "positive_signals": 106,
+          "signals": 1743
+        }
+      },
+      "train_validation_group_overlap": []
+    }
+  },
+  "literature": {
+    "audit_version": "vsb-literature-forensic-v1",
+    "external_code_used": false,
+    "external_weights_used": false,
+    "records": [
+      {
+        "basis": "repository source and historical artifacts",
+        "item": "V3 whole-signal CWT",
+        "status": "VERIFIED"
+      },
+      {
+        "basis": "repository configs and reports",
+        "item": "V4 uniform windows 16384/8192 and top-10 percent",
+        "status": "VERIFIED"
+      },
+      {
+        "basis": "repository pulse implementation",
+        "item": "V5 alignment, alpha/beta flattening, knee, MIL, CWT",
+        "status": "VERIFIED"
+      },
+      {
+        "basis": "https://arxiv.org/abs/2012.11532 abstract and bibliographic record",
+        "item": "Dual-CyCon Net high-level dual-domain and cycle-consistency method",
+        "status": "VERIFIED"
+      },
+      {
+        "basis": "No exact VSB-equivalent preprocessing protocol was verified for this audit.",
+        "item": "Dual-CyCon exact VSB preprocessing, labels, and split transfer",
+        "status": "UNAVAILABLE"
+      },
+      {
+        "basis": "predeclared audit adaptation",
+        "item": "Michau detector parameters",
+        "status": "PROJECT LITERATURE ANCHOR \u2014 NOT INDEPENDENTLY VERIFIED DURING AUDIT"
+      },
+      {
+        "basis": "predeclared audit adaptation",
+        "item": "Chen detector parameters",
+        "status": "PROJECT LITERATURE ANCHOR \u2014 NOT INDEPENDENTLY VERIFIED DURING AUDIT"
+      }
+    ],
+    "repository_register_available": true,
+    "unresolved": [
+      "Dropbox workspace unavailable; active checkout used.",
+      "researchdata forbidden and not required.",
+      "signal-level VSB target is not silently converted to measurement-level labels."
+    ]
+  },
+  "morphology": {
+    "cluster_counts": {
+      "0": 2278,
+      "1": 1704,
+      "10": 1056,
+      "11": 2214,
+      "2": 1974,
+      "3": 1003,
+      "4": 2725,
+      "5": 2019,
+      "6": 2609,
+      "7": 1272,
+      "8": 2108,
+      "9": 1602
+    },
+    "n_clusters": 12,
+    "n_waveforms": 22564,
+    "pca_explained_variance_ratio": [
+      0.1855866014957428,
+      0.04185893386602402,
+      0.03086676634848118,
+      0.026568520814180374,
+      0.020185796543955803,
+      0.01915229856967926,
+      0.019101381301879883,
+      0.017905864864587784,
+      0.016818035393953323,
+      0.015818336978554726
+    ],
+    "waveform_length": 128
+  },
+  "protected_input_paths": [
+    "reports/metrics/v5-pulse-aware",
+    "results/manifests/matlab_manifest_v3_windowed.csv"
+  ],
+  "stages": {
+    "baseline": true,
+    "cwt": true,
+    "integrity": true,
+    "literature": true,
+    "morphology": true,
+    "scan": true
+  },
+  "verdict": "GO"
+}

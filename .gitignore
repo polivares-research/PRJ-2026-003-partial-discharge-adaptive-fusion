@@ -172,3 +172,6 @@ CODEX.md
 *.prompt.md
 *.memory.md
 *.agent.md
+# VSB forensic audit generated raw-derived outputs
+results/audits/vsb-literature-forensic/**
+reports/figures/vsb-literature-forensic/**
