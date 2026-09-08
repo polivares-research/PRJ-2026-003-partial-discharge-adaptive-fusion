@@ -3,6 +3,14 @@ import pytest
 import torch
 
 from partial_discharge_adaptive_fusion.modeling.pulse_models import PulseBagExpert
+from partial_discharge_adaptive_fusion.modeling.pulse_preprocessing import (
+    IndexedPulseView,
+    PulseMaskView,
+    PulseRepresentationView,
+    StandardizedPulseView,
+    fit_pulse_standardizer,
+)
+from partial_discharge_adaptive_fusion.modeling.pulse_data import PulseBagDataset
 from partial_discharge_adaptive_fusion.pulse import PulsePolicy, prepare_pulse_bag, pulse_coverage_report
 from partial_discharge_adaptive_fusion.pulse_cache import (
     CacheContractError, CacheMetadata, open_verified_memmap, write_memmap_cache,
@@ -42,6 +50,26 @@ def test_v5_temporal_and_cwt_experts_return_one_parent_logit():
     assert temporal_logits.shape == cwt_logits.shape == (2,)
     assert torch.isfinite(temporal_logits).all()
     assert torch.isfinite(cwt_logits).all()
+
+
+def test_v5_lazy_candidate_views_preserve_parent_indexing_and_masks():
+    values = np.arange(4 * 2 * 8 * 1 * 16, dtype=np.float32).reshape(4, 2, 8, 1, 16)
+    valid = np.ones((4, 2, 8), dtype=bool)
+    valid[2, :, 4:] = False
+    candidate = PulseRepresentationView(values, representation="temporal", n_pulses=4)
+    masks = PulseMaskView(valid, 4)
+    subset = IndexedPulseView(candidate, np.array([3, 1]))
+    subset_masks = IndexedPulseView(masks, np.array([3, 1]))
+    assert subset.shape == (2, 2, 4, 1, 16)
+    assert np.array_equal(subset[0], candidate[3])
+    assert np.array_equal(subset_masks[1], masks[1])
+    standardizer = fit_pulse_standardizer(candidate, masks, np.array([0, 1]))
+    normalized = StandardizedPulseView(candidate, masks, standardizer)
+    dataset = PulseBagDataset(normalized, masks, np.zeros(4), np.array([0, 1]))
+    batch_values, batch_mask, batch_labels = dataset[0]
+    assert batch_values.shape == (2, 4, 1, 16)
+    assert batch_mask.shape == (2, 4)
+    assert batch_labels.item() == 0.0
 
 
 def test_v5_cache_rejects_partial_and_incompatible_artifacts(tmp_path):
