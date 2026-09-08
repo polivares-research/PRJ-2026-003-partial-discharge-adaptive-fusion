@@ -1,0 +1,91 @@
+config_version: vsb-literature-forensic-audit-v1
+protocol_status: audit
+data_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+  researchdata_forbidden: true
+  dropbox_forbidden: true
+dataset:
+  id: engineering-vsb-power-line-fault-detection
+  version: 2018-kaggle-snapshot
+  sampling_frequency_hz: 40000000.0
+  signal_length: 800000
+development:
+  split_seed: 42
+  oof_folds: 5
+  allowed_splits: [train, validation]
+  blocked_splits: [test, official_unlabeled_test]
+  group_column: id_measurement
+  seeds: [42, 43, 44]
+detectors:
+  matching_tolerance_samples: 32
+  v5_current:
+    source_status: VERIFIED_FROM_REPOSITORY
+  michau_anchor:
+    highpass_order: 5
+    highpass_cutoff_hz: 20000.0
+    locality_samples: 40
+    prominence_mad: 6.0
+    source_status: PROJECT_LITERATURE_ANCHOR_UNLESS_VERIFIED
+  chen_anchor:
+    savgol_window: 99
+    savgol_order: 3
+    locality_samples: 30
+    prominence_mad: 6.0
+    source_status: PROJECT_LITERATURE_ANCHOR_UNLESS_VERIFIED
+  dualcycon_strict:
+    moving_average_samples: 10000
+    alpha: 100.0
+    beta: 1.0
+    minimum_peak_distance: 512
+    max_peaks_per_half: 257
+    source_status: PROJECT_LITERATURE_ANCHOR_UNLESS_VERIFIED
+alignment:
+  dft_frequency_candidates_hz: [50.0, 60.0]
+  minimum_success_rate: 0.95
+  minimum_all_phase_measurement_rate: 0.95
+  maximum_median_disagreement_degrees: 20.0
+  force_120_degree_relation: false
+segments:
+  lengths_samples: [30, 40, 128, 512]
+  allow_signal_boundary_padding: false
+morphology:
+  pca_components: 10
+  kmeans_clusters: 12
+  random_state: 42
+  maximum_waveforms: 25000
+cwt:
+  segment_length: 512
+  scales: 32
+  minimum_scale_samples: 1.5
+  maximum_scale_samples: 64.0
+  morlet_w0: 6.0
+  time_bins: 128
+  maximum_events_per_parent: 6
+baselines:
+  classifiers: [logistic_regression, hist_gradient_boosting]
+  threshold_grid_start: 0.05
+  threshold_grid_stop: 0.95
+  threshold_grid_step: 0.005
+  phase_independent: true
+  measurement_aware: true
+  measurement_any_positive_diagnostic: true
+  random_signal_split_fraction: 0.25
+  no_lightgbm_install: true
+outputs:
+  audit_root: results/audits/vsb-literature-forensic
+  report_root: reports/audits
+  figure_root: reports/figures/vsb-literature-forensic
+  report: reports/audits/vsb_literature_forensic_audit.md
+  summary: reports/audits/vsb_literature_forensic_audit.json
+  manifest: reports/audits/vsb_literature_forensic_manifest.md
+runtime:
+  io_batch_size: 4
+  max_workers: 0
+  use_cuda_for_torch: true
+holdout_policy:
+  vsb_grouped_test: forbidden
+  vsb_official_test: forbidden
+  matlab_te2: forbidden
+  external_weights: forbidden
