@@ -255,3 +255,52 @@ def hierarchical_grouped_delta_ci(
         "iterations": int(iterations),
         "seed_count": int(len(records)),
     }
+
+
+def hierarchical_paired_delta_ci(
+    seed_predictions: Iterable[dict[str, np.ndarray]],
+    comparison: str,
+    *,
+    iterations: int = 10_000,
+    seed: int = 42,
+) -> dict[str, object]:
+    """Hierarchical paired bootstrap for independent-signal MATLAB seeds."""
+
+    records = list(seed_predictions)
+    if not records:
+        raise ValueError("At least one seed prediction record is required")
+    child_seeds = np.random.SeedSequence(seed).spawn(len(records))
+    values: list[np.ndarray] = []
+    points: list[float] = []
+    for record, child in zip(records, child_seeds):
+        labels = np.asarray(record["labels"], dtype=np.int64)
+        prediction_a = np.asarray(record["prediction_a"], dtype=np.int64)
+        prediction_b = np.asarray(record["prediction_b"], dtype=np.int64)
+        if not (len(labels) == len(prediction_a) == len(prediction_b)):
+            raise ValueError("Hierarchical paired bootstrap inputs are not aligned")
+        rng = np.random.default_rng(int(child.generate_state(1)[0]))
+        sampled = rng.integers(0, len(labels), size=(iterations, len(labels)))
+        deltas = np.empty(iterations, dtype=np.float64)
+        for start in range(0, iterations, 128):
+            stop = min(iterations, start + 128)
+            index = sampled[start:stop]
+            y = labels[index]
+            a = prediction_a[index]
+            b = prediction_b[index]
+            deltas[start:stop] = np.asarray([
+                fast_mcc(y_row, a_row) - fast_mcc(y_row, b_row)
+                for y_row, a_row, b_row in zip(y, a, b)
+            ])
+        values.append(deltas)
+        points.append(fast_mcc(labels, prediction_a) - fast_mcc(labels, prediction_b))
+    aggregate = np.mean(np.vstack(values), axis=0)
+    return {
+        "comparison": comparison,
+        "point_estimate": float(np.mean(points)),
+        "bootstrap_mean": float(aggregate.mean()),
+        "ci_95": [float(np.quantile(aggregate, 0.025)), float(np.quantile(aggregate, 0.975))],
+        "fraction_gt_zero": float(np.mean(aggregate > 0)),
+        "iterations": int(iterations),
+        "seed_count": int(len(records)),
+        "bootstrap_unit": "individual_signal",
+    }
