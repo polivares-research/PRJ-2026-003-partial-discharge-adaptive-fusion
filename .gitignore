@@ -177,3 +177,6 @@ results/audits/vsb-literature-forensic/**
 reports/figures/vsb-literature-forensic/**
 results/audits/vsb-modality-contribution/**
 reports/figures/vsb-modality-contribution/**
+results/cache/temporal-spectrogram-cross-dataset/**
+results/audits/temporal-spectrogram-cross-dataset/**
+reports/figures/temporal-spectrogram-cross-dataset/**
