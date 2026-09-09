@@ -142,3 +142,116 @@ def summarize_seed_deltas(deltas: Iterable[float]) -> dict[str, float | int]:
         "positive_seeds": int(np.sum(values > 0)),
         "target_reached_seeds": int(np.sum(values >= 0.005)),
     }
+
+
+def _group_bootstrap_values(
+    labels: np.ndarray,
+    prediction_a: np.ndarray,
+    prediction_b: np.ndarray,
+    group_ids: np.ndarray,
+    *,
+    iterations: int,
+    seed: int,
+) -> np.ndarray:
+    labels = np.asarray(labels, dtype=np.int64)
+    prediction_a = np.asarray(prediction_a, dtype=np.int64)
+    prediction_b = np.asarray(prediction_b, dtype=np.int64)
+    group_ids = np.asarray(group_ids).astype(str)
+    if len(labels) == 0 or not (len(labels) == len(prediction_a) == len(prediction_b) == len(group_ids)):
+        raise ValueError("Grouped bootstrap inputs must be non-empty and equally sized")
+    if not all(np.isin(values, [0, 1]).all() for values in (labels, prediction_a, prediction_b)):
+        raise ValueError("Grouped bootstrap currently requires binary labels and predictions")
+    unique_groups, inverse = np.unique(group_ids, return_inverse=True)
+    categories = labels * 4 + prediction_a * 2 + prediction_b
+    group_categories = np.zeros((len(unique_groups), 8), dtype=np.float64)
+    np.add.at(group_categories, (inverse, categories), 1.0)
+    rng = np.random.default_rng(seed)
+    values = np.empty(iterations, dtype=np.float64)
+    probabilities = np.full(len(unique_groups), 1.0 / len(unique_groups), dtype=np.float64)
+    offset = 0
+    while offset < iterations:
+        count = min(128, iterations - offset)
+        sampled = rng.multinomial(len(unique_groups), probabilities, size=count).astype(np.float64)
+        state = sampled @ group_categories
+        labels_one = state[:, 4:8].sum(axis=1)
+        labels_zero = state[:, :4].sum(axis=1)
+        tp_a = state[:, 6] + state[:, 7]
+        fp_a = state[:, 2] + state[:, 3]
+        fn_a = labels_one - tp_a
+        tn_a = labels_zero - fp_a
+        tp_b = state[:, 5] + state[:, 7]
+        fp_b = state[:, 1] + state[:, 3]
+        fn_b = labels_one - tp_b
+        tn_b = labels_zero - fp_b
+        den_a = np.sqrt((tp_a + fp_a) * (tp_a + fn_a) * (tn_a + fp_a) * (tn_a + fn_a))
+        den_b = np.sqrt((tp_b + fp_b) * (tp_b + fn_b) * (tn_b + fp_b) * (tn_b + fn_b))
+        mcc_a = np.divide(tp_a * tn_a - fp_a * fn_a, den_a, out=np.zeros_like(den_a), where=den_a != 0)
+        mcc_b = np.divide(tp_b * tn_b - fp_b * fn_b, den_b, out=np.zeros_like(den_b), where=den_b != 0)
+        values[offset:offset + count] = mcc_a - mcc_b
+        offset += count
+    return values
+
+
+def grouped_paired_bootstrap_delta(
+    labels: np.ndarray,
+    prediction_a: np.ndarray,
+    prediction_b: np.ndarray,
+    group_ids: np.ndarray,
+    *,
+    iterations: int = 10_000,
+    seed: int = 42,
+) -> dict[str, object]:
+    """Bootstrap a paired MCC delta by resampling complete measurement groups."""
+
+    values = _group_bootstrap_values(
+        labels, prediction_a, prediction_b, group_ids, iterations=iterations, seed=seed,
+    )
+    labels = np.asarray(labels, dtype=np.int64)
+    prediction_a = np.asarray(prediction_a, dtype=np.int64)
+    prediction_b = np.asarray(prediction_b, dtype=np.int64)
+    return {
+        "point_estimate": fast_mcc(labels, prediction_a) - fast_mcc(labels, prediction_b),
+        "bootstrap_mean": float(values.mean()),
+        "bootstrap_median": float(np.median(values)),
+        "ci_95": [float(np.quantile(values, 0.025)), float(np.quantile(values, 0.975))],
+        "fraction_gt_zero": float(np.mean(values > 0)),
+        "iterations": int(iterations),
+        "group_count": int(np.unique(np.asarray(group_ids).astype(str)).size),
+    }
+
+
+def hierarchical_grouped_delta_ci(
+    seed_predictions: Iterable[dict[str, np.ndarray]],
+    comparison: str,
+    *,
+    iterations: int = 10_000,
+    seed: int = 42,
+) -> dict[str, object]:
+    """Resample groups independently within seeds and average seed deltas."""
+
+    records = list(seed_predictions)
+    if not records:
+        raise ValueError("At least one seed prediction record is required")
+    child_seeds = np.random.SeedSequence(seed).spawn(len(records))
+    values = []
+    points = []
+    for record, child in zip(records, child_seeds):
+        labels = np.asarray(record["labels"], dtype=np.int64)
+        prediction_a = np.asarray(record["prediction_a"], dtype=np.int64)
+        prediction_b = np.asarray(record["prediction_b"], dtype=np.int64)
+        group_ids = np.asarray(record["group_ids"])
+        values.append(_group_bootstrap_values(
+            labels, prediction_a, prediction_b, group_ids,
+            iterations=iterations, seed=int(child.generate_state(1)[0]),
+        ))
+        points.append(fast_mcc(labels, prediction_a) - fast_mcc(labels, prediction_b))
+    aggregate = np.mean(np.vstack(values), axis=0)
+    return {
+        "comparison": comparison,
+        "point_estimate": float(np.mean(points)),
+        "bootstrap_mean": float(aggregate.mean()),
+        "ci_95": [float(np.quantile(aggregate, 0.025)), float(np.quantile(aggregate, 0.975))],
+        "fraction_gt_zero": float(np.mean(aggregate > 0)),
+        "iterations": int(iterations),
+        "seed_count": int(len(records)),
+    }

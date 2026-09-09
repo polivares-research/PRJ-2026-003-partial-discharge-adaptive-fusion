@@ -597,15 +597,101 @@ def _feature_columns(frame: pd.DataFrame, detector_id: str) -> list[str]:
     return [column for column in frame.columns if column.startswith(prefix) and frame[column].dtype.kind in "bifu"]
 
 
-def make_three_phase_features(frame: pd.DataFrame, columns: Sequence[str]) -> pd.DataFrame:
-    """Attach ordered phase-0/1/2 feature blocks to every signal row."""
+def make_three_phase_features(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    phase_order: Sequence[str] = ("0", "1", "2"),
+) -> pd.DataFrame:
+    """Attach fixed-order phase blocks while preserving the original signal target.
 
-    base = frame[["sample_id", "id_measurement", "phase", "target", "split", "oof_fold"]].copy()
-    phase = frame.pivot(index="id_measurement", columns="phase", values=list(columns))
+    A measurement must contain exactly one row for each requested phase. The
+    target is never pivoted or aggregated, so mixed-label measurements retain
+    their original phase-level target on every output row.
+    """
+
+    required = {"sample_id", "id_measurement", "phase", "target", "split", "oof_fold"}
+    missing = required - set(frame.columns)
+    if missing:
+        raise ValueError(f"Three-phase features missing columns: {sorted(missing)}")
+    phase_order = tuple(str(value) for value in phase_order)
+    if len(phase_order) != 3 or len(set(phase_order)) != 3:
+        raise ValueError("phase_order must contain exactly three distinct phase IDs")
+    if frame["sample_id"].duplicated().any():
+        raise ValueError("Three-phase input contains duplicate sample_id values")
+    working = frame.copy()
+    working["phase"] = working["phase"].astype(str)
+    grouped = working.groupby("id_measurement", sort=False)
+    for measurement, group in grouped:
+        values = tuple(sorted(group["phase"].tolist()))
+        if len(group) != 3 or set(values) != set(phase_order) or len(set(values)) != 3:
+            raise ValueError(
+                f"Measurement {measurement!r} does not contain exactly phases {phase_order}: {values}"
+            )
+    columns = list(columns)
+    missing_features = set(columns) - set(working.columns)
+    if missing_features:
+        raise ValueError(f"Three-phase input missing feature columns: {sorted(missing_features)}")
+    base = working[["sample_id", "id_measurement", "phase", "target", "split", "oof_fold"]].copy()
+    phase = working.set_index(["id_measurement", "phase"])[columns].unstack("phase")
+    ordered_columns = pd.MultiIndex.from_product([columns, phase_order])
+    phase = phase.reindex(columns=ordered_columns)
     phase.columns = [f"phase_{phase_id}_{column}" for column, phase_id in phase.columns]
     phase = phase.reset_index()
     result = base.merge(phase, on="id_measurement", how="left", validate="many_to_one")
+    if len(result) != len(frame):
+        raise ValueError("Three-phase join changed the number of signal rows")
     return result
+
+
+def prepare_forensic_baseline_frame(
+    audit_root: str | Path,
+) -> tuple[pd.DataFrame, list[str]]:
+    """Load the immutable forensic detector/CWT artifacts in canonical order."""
+
+    root = Path(audit_root)
+    detector_path = root / "detector_features.parquet"
+    cwt_path = root / "cwt_features.parquet"
+    if not detector_path.is_file() or not cwt_path.is_file():
+        raise FileNotFoundError("Forensic detector_features.parquet and cwt_features.parquet are required")
+    frame = pd.read_parquet(detector_path)
+    if "sample_id" not in frame or frame["sample_id"].duplicated().all():
+        raise ValueError("Forensic detector artifact has invalid sample IDs")
+    frame = frame.groupby("sample_id", as_index=False, sort=False).first()
+    cwt = pd.read_parquet(cwt_path)
+    if cwt["sample_id"].duplicated().any():
+        raise ValueError("Forensic CWT artifact has duplicate sample IDs")
+    cwt_columns = [column for column in cwt.columns if column.startswith("cwt_")]
+    frame = frame.merge(
+        cwt[["sample_id"] + cwt_columns],
+        on="sample_id",
+        how="left",
+        validate="one_to_one",
+    )
+    prefixes = ("v5_current_", "michau_anchor_", "chen_anchor_", "dualcycon_strict_")
+    feature_order = [
+        column for column in frame.columns
+        if (column.startswith(prefixes) or column.startswith("cwt_"))
+        and frame[column].dtype.kind in "bifu"
+    ]
+    if len(frame) != 6972 or len(feature_order) != 153:
+        raise ValueError(
+            f"Unexpected forensic baseline shape: rows={len(frame)}, predictors={len(feature_order)}"
+        )
+    strict_columns = [column for column in feature_order if column.startswith("dualcycon_strict_")]
+    strict_missing = frame[strict_columns].isna().all(axis=1)
+    if int(strict_missing.sum()) != 68:
+        raise ValueError(f"Expected 68 strict-detector structural failures, found {int(strict_missing.sum())}")
+    other_missing = frame[[column for column in feature_order if column not in strict_columns]].isna().any().any()
+    if bool(other_missing):
+        raise ValueError("Non-structural forensic predictors contain missing values")
+    nonfinite = ~np.isfinite(frame[feature_order].drop(columns=strict_columns).to_numpy(dtype=float)).all()
+    if bool(nonfinite):
+        raise ValueError("Non-structural forensic predictors contain non-finite values")
+    frame.loc[:, strict_columns] = frame.loc[:, strict_columns].fillna(0.0)
+    if not np.isfinite(frame[feature_order].to_numpy(dtype=float)).all():
+        raise ValueError("Structural-zero application left non-finite forensic predictors")
+    return frame, feature_order
 
 
 def _select_threshold(labels: np.ndarray, probabilities: np.ndarray) -> float:
@@ -637,7 +723,7 @@ def _inner_oof_predictions(
     return result
 
 
-def evaluate_feature_baseline(
+def evaluate_feature_baseline_with_predictions(
     frame: pd.DataFrame,
     columns: Sequence[str],
     *,
@@ -646,13 +732,15 @@ def evaluate_feature_baseline(
     grouped: bool = True,
     mode: str = "phase_independent",
 ) -> dict[str, Any]:
-    """Evaluate one fixed feature/classifier protocol without validation leakage."""
+    """Evaluate one fixed baseline and return one prediction per validation signal."""
 
     if mode == "measurement_aware":
-        prepared = make_three_phase_features(frame, columns)
+        prepared = make_three_phase_features(frame, columns, phase_order=("0", "1", "2"))
         columns = [column for column in prepared.columns if column.startswith("phase_")]
+    elif mode == "phase_independent":
+        prepared = frame.copy()
     else:
-        prepared = frame
+        raise ValueError(f"Unsupported baseline mode: {mode}")
     train = prepared[prepared["split"] == "train"].copy()
     validation = prepared[prepared["split"] == "validation"].copy()
     if len(train) == 0 or len(validation) == 0:
@@ -669,7 +757,13 @@ def evaluate_feature_baseline(
     estimator = _make_estimator(classifier, seed)
     estimator.fit(train_values, train_labels)
     probabilities = estimator.predict_proba(validation_values)[:, 1]
+    predictions = (probabilities >= threshold).astype(np.int64)
     metrics = classification_metrics(validation_labels, probabilities, threshold)
+    prediction_frame = validation[["sample_id", "id_measurement", "phase", "target"]].copy()
+    prediction_frame["sample_id"] = prediction_frame["sample_id"].astype(str)
+    prediction_frame["id_measurement"] = prediction_frame["id_measurement"].astype(str)
+    prediction_frame["probability"] = probabilities.astype(float)
+    prediction_frame["prediction"] = predictions
     return {
         "classifier": classifier,
         "seed": int(seed),
@@ -680,7 +774,26 @@ def evaluate_feature_baseline(
         "n_features": int(len(columns)),
         "threshold_from_train_oof": threshold,
         "metrics": metrics,
+        "validation_predictions": prediction_frame,
     }
+
+
+def evaluate_feature_baseline(
+    frame: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    classifier: str,
+    seed: int,
+    grouped: bool = True,
+    mode: str = "phase_independent",
+) -> dict[str, Any]:
+    """Evaluate one fixed feature/classifier protocol without validation leakage."""
+
+    result = evaluate_feature_baseline_with_predictions(
+        frame, columns, classifier=classifier, seed=seed, grouped=grouped, mode=mode,
+    )
+    result.pop("validation_predictions", None)
+    return result
 
 
 def evaluate_random_signal_protocol(

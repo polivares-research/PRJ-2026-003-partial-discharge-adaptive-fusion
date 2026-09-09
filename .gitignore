@@ -175,3 +175,5 @@ CODEX.md
 # VSB forensic audit generated raw-derived outputs
 results/audits/vsb-literature-forensic/**
 reports/figures/vsb-literature-forensic/**
+results/audits/vsb-modality-contribution/**
+reports/figures/vsb-modality-contribution/**

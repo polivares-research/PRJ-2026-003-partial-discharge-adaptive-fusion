@@ -1,0 +1,121 @@
+config_version: vsb-modality-contribution-diagnostic-v1
+protocol_status: development_only
+objective: quantify temporal and CWT contribution to the frozen VSB forensic baseline
+branch_contract: diagnostic/vsb-modality-contribution
+data_contract:
+  source_type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+  researchdata: forbidden
+  dropbox: forbidden
+  raw_holdouts: forbidden
+source_artifacts:
+  audit_root: results/audits/vsb-literature-forensic
+  forensic_config: configs/experiments/vsb-literature-forensic-audit-localraw.yaml
+  required_markers: [integrity.complete, scan.complete, cwt.complete, baseline.complete]
+  audit_config_sha256: b1fb66d3216c81e23bd05653b933b2c5c1080f1ffac9abf4ff30040acc3fd2c3
+  development_manifest_fingerprint: 234be431f062fe2058d3c5d4a7508b39eb4ce5f6fb55dfa49b68c81554ad78c7
+  development_metadata_sha256: 20b10a4648045a36ab96279bd4d2f045ceb6025134cd95c5891442807682ddb6
+  detector_features_sha256: 8fac617c3553326285c7d9b899d19ba12b3cef9c142274b3eadc29160c2e9686
+  cwt_features_sha256: 7dbc80e427a46b25da4f6fb274bc3c2d2e55a0202b32b25ec76199077ee94354
+  structural_missingness:
+    detector: dualcycon_strict
+    missing_rows: 68
+    missing_columns: 36
+    replacement: 0.0
+scope:
+  full_labeled_signals: 8712
+  full_measurements: 2904
+  full_positive_signals: 525
+  full_mixed_label_measurements: 38
+  development_signals: 6972
+  development_measurements: 2324
+  train_signals: 5229
+  train_measurements: 1743
+  train_positive_signals: 313
+  validation_signals: 1743
+  validation_measurements: 581
+  validation_positive_signals: 106
+  locked_test_signals: 1740
+  locked_test_measurements: 580
+  locked_test_positive_signals: 106
+  primary_target: phase_signal_target
+  measurement_any_positive: forbidden
+  holdout_access: forbidden
+features:
+  canonical_count: 153
+  families:
+    S: 113
+    T: 32
+    C: 8
+  sets: [S, S+T, S+C, S+T+C]
+  phase_order: ["0", "1", "2"]
+  detector_prefixes: [v5_current, michau_anchor, chen_anchor, dualcycon_strict]
+  canonical_order_required: true
+classifiers:
+  primary: hist_gradient_boosting
+  secondary: logistic_regression
+  hist_gradient_boosting:
+    max_iter: 200
+    learning_rate: 0.05
+    max_leaf_nodes: 15
+    l2_regularization: 1.0
+    class_weight: null
+  logistic_regression:
+    class_weight: balanced
+    max_iter: 500
+    standard_scaler: train_only
+seeds: [42, 43, 44]
+split:
+  primary: fixed_forensic_train_validation
+  group_column: id_measurement
+  inner_oof_folds: 5
+  threshold_start: 0.05
+  threshold_stop: 0.95
+  threshold_step: 0.005
+  random_signal_split: secondary_diagnostic_only
+  random_train_fraction: 0.75
+statistics:
+  primary_metric: MCC
+  paired_bootstrap_iterations: 10000
+  bootstrap_unit: id_measurement
+  confidence_level: 0.95
+  delta_definitions:
+    delta_t: MCC(S+T)-MCC(S)
+    delta_c: MCC(S+C)-MCC(S)
+    delta_c_given_t: MCC(S+T+C)-MCC(S+T)
+    delta_t_given_c: MCC(S+T+C)-MCC(S+C)
+    delta_three_phase: MCC(measurement_aware)-MCC(phase_independent)
+regression:
+  tolerance_mcc: 1.0e-9
+  tolerance_threshold: 1.0e-12
+  feature_family: S+T+C
+  classifier: hist_gradient_boosting
+  expected:
+    phase_independent:
+      42: {mcc: 0.627081395599982, threshold: 0.145}
+      43: {mcc: 0.632049896620652, threshold: 0.185}
+      44: {mcc: 0.6194280719688356, threshold: 0.335}
+    measurement_aware:
+      42: {mcc: 0.6622834661822181, threshold: 0.380}
+      43: {mcc: 0.6581113302240205, threshold: 0.555}
+      44: {mcc: 0.6891576471408442, threshold: 0.215}
+verdict:
+  cwt_strong_conditional_mean: 0.010
+  cwt_weak_conditional_mean: 0.005
+  redundant_absolute_mean: 0.005
+  minimum_positive_seeds: 2
+outputs:
+  root: results/audits/vsb-modality-contribution
+  figures: reports/figures/vsb-modality-contribution
+  report: reports/audits/vsb_modality_contribution_diagnostic.md
+  summary: reports/audits/vsb_modality_contribution_diagnostic.json
+  manifest: reports/audits/vsb_modality_contribution_manifest.md
+holdout_policy:
+  vsb_grouped_test: forbidden
+  vsb_official_unlabeled_test: forbidden
+  matlab_te2: forbidden
+  external_weights: forbidden
+  neural_training: forbidden
+  fusion: forbidden
+  model_search: forbidden
