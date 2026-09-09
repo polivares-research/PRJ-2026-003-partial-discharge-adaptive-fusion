@@ -114,3 +114,47 @@ def test_historical_combined_baseline_regression():
             result = evaluate_feature_baseline(frame, columns, classifier="hist_gradient_boosting", seed=seed, grouped=True, mode=mode)
             assert abs(result["metrics"]["mcc"] - reference["mcc"]) <= 1e-9
             assert abs(result["threshold_from_train_oof"] - reference["threshold"]) <= 1e-12
+
+
+def test_feature_inventory_rejects_metadata_as_predictor():
+    with pytest.raises(Exception, match="Unassignable"):
+        build_modality_feature_inventory(_canonical_columns()[:-1] + ["target"])
+
+
+@pytest.mark.integration
+def test_source_locks_and_prediction_contract():
+    from pathlib import Path
+    from partial_discharge_adaptive_fusion.vsb_modality import validate_modality_source_artifacts
+    root = Path(__file__).parents[2]
+    audit_root = root / "results/audits/vsb-literature-forensic"
+    output_root = root / "results/audits/vsb-modality-contribution"
+    if not (audit_root / "detector_features.parquet").is_file():
+        pytest.skip("forensic artifacts are not available")
+    provenance = validate_modality_source_artifacts(
+        audit_root,
+        {"source_artifacts": {"forensic_config": str(root / "configs/experiments/vsb-literature-forensic-audit-localraw.yaml")}},
+    )
+    assert provenance["alignment_status"] == "VALID"
+    assert provenance["holdout_rows"] == 0
+    assert provenance["structural_zero_rows"] == 68
+    predictions = pd.read_parquet(output_root / "validation_predictions.parquet")
+    primary = predictions[predictions["protocol"] == "group_safe_primary"]
+    assert primary["probability"].between(0.0, 1.0).all()
+    counts = primary.groupby(["seed", "feature_family", "mode"])["sample_id"].nunique()
+    assert counts.eq(1743).all()
+
+
+@pytest.mark.integration
+def test_source_lock_rejects_modified_hash(monkeypatch):
+    from pathlib import Path
+    import partial_discharge_adaptive_fusion.vsb_modality as modality
+    root = Path(__file__).parents[2]
+    audit_root = root / "results/audits/vsb-literature-forensic"
+    if not (audit_root / "detector_features.parquet").is_file():
+        pytest.skip("forensic artifacts are not available")
+    monkeypatch.setitem(modality.REQUIRED_SOURCE_HASHES, "detector_features_sha256", "0" * 64)
+    with pytest.raises(modality.ModalityDiagnosticError, match="Source hash lock mismatch"):
+        modality.validate_modality_source_artifacts(
+            audit_root,
+            {"source_artifacts": {"forensic_config": str(root / "configs/experiments/vsb-literature-forensic-audit-localraw.yaml")}},
+        )
