@@ -82,13 +82,14 @@ def compute_stft_log_power(values: np.ndarray, spec: STFTSpec) -> np.ndarray:
         raise ValueError("STFT input contains non-finite values")
     window = torch.hann_window(spec.win_length, periodic=True, dtype=torch.float32)
     tensor = torch.from_numpy(array)
-    transformed = torch.stft(
-        tensor, n_fft=spec.n_fft, hop_length=spec.hop_length,
-        win_length=spec.win_length, window=window, center=spec.center,
-        onesided=spec.onesided, return_complex=True,
-    )
+    # Explicit framing is intentional. ``torch.stft`` uses ``n_fft`` as the
+    # frame extent when ``center=False``; the registered MATLAB geometry uses
+    # ``win_length`` frames zero-padded only inside each FFT instead.
+    frames = tensor.unfold(1, spec.win_length, spec.hop_length)
+    framed = frames * window.view(1, 1, -1)
+    transformed = torch.fft.rfft(framed, n=spec.n_fft, dim=-1)
     power = transformed.real.square() + transformed.imag.square()
-    result = torch.log(power + spec.epsilon).unsqueeze(1).cpu().numpy().astype(np.float32)
+    result = torch.log(power + spec.epsilon).transpose(1, 2).unsqueeze(1).cpu().numpy().astype(np.float32)
     expected = (array.shape[0], 1, spec.frequency_count(), spec.frame_count(array.shape[1]))
     if result.shape != expected or not np.isfinite(result).all():
         raise RuntimeError(f"Unexpected or non-finite STFT result: {result.shape}, expected {expected}")
@@ -167,7 +168,7 @@ def require_valid_cache(path: str | Path, expected_fingerprint: str) -> np.ndarr
     metadata = json.loads(meta_path.read_text(encoding="utf-8"))
     if metadata.get("fingerprint") != expected_fingerprint:
         raise ValueError("Spectrogram cache fingerprint mismatch")
-    values = np.load(destination, mmap_mode="r")
+    values = np.load(destination, mmap_mode="r", allow_pickle=False)
     if tuple(values.shape) != tuple(metadata["shape"]) or str(values.dtype) != metadata["dtype"]:
         raise ValueError("Spectrogram cache shape or dtype mismatch")
     return values
