@@ -308,8 +308,13 @@ def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, outp
 
 def stage_evaluation(config: dict[str, Any], output: Path, logger: logging.Logger) -> None:
     if complete(output, "evaluation"):
-        logger.info("evaluation already complete; reusing report tables")
-        return
+        prediction_path = output / "validation_predictions.parquet"
+        if prediction_path.is_file():
+            existing = pd.read_parquet(prediction_path)
+            if "prediction" in existing.columns and not existing["prediction"].isna().any():
+                logger.info("evaluation already complete; reusing report tables")
+                return
+        logger.info("existing evaluation marker is stale; repairing predictions and recomputing evaluation")
     if not complete(output, "experts"):
         raise RuntimeError("Run experts before evaluation")
     started = time.perf_counter()
