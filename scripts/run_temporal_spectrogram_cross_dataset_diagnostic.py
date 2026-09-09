@@ -108,8 +108,9 @@ def dataset_handles(raw_root: Path):
 def development_metadata(audit_root: Path, raw_vsb: Any) -> pd.DataFrame:
     source = pd.read_csv(audit_root / "development_metadata.csv", dtype={"sample_id": str, "id_measurement": str, "phase": str})
     raw = load_vsb_metadata(raw_vsb)
-    raw["sample_id"] = raw["signal_id"].astype(str)
-    result = source.merge(raw[["sample_id", "signal_id"]], on="sample_id", how="left", validate="one_to_one")
+    source["signal_id"] = source["signal_id"].astype(str)
+    raw["signal_id"] = raw["signal_id"].astype(str)
+    result = source.merge(raw[["signal_id"]], on="signal_id", how="left", validate="one_to_one")
     if result["signal_id"].isna().any() or len(result) != 6972:
         raise RuntimeError("The forensic development metadata cannot be mapped to local VSB signals")
     return result
