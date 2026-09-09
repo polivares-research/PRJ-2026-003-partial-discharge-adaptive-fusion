@@ -45,6 +45,26 @@ class SmallCWT2DCNN(nn.Module):
         return (logits, embedding) if return_embedding else logits
 
 
+class SmallSpectrogram2DCNN(nn.Module):
+    """Registered MATLAB log-power STFT expert with the small 16/32/64 layout."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 16, 3, padding=1), nn.BatchNorm2d(16), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(16, 32, 3, padding=1), nn.BatchNorm2d(32), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(), nn.AdaptiveAvgPool2d(1),
+        )
+        self.classifier = nn.Linear(64, 1)
+
+    def forward(self, x, return_embedding: bool = False):
+        if x.ndim != 4 or x.shape[1] != 1 or min(x.shape[-2:]) < 4:
+            raise ValueError(f"Expected [batch, 1, frequency, time], got {tuple(x.shape)}")
+        embedding = self.features(x).flatten(1)
+        logits = self.classifier(embedding).squeeze(-1)
+        return (logits, embedding) if return_embedding else logits
+
+
 class _ResidualTemporalBlock(nn.Module):
     """Compact residual block used by the V4 geometry-adapted temporal expert."""
 
@@ -141,6 +161,8 @@ def make_expert(kind: str) -> nn.Module:
         return TinyTemporalCNN()
     if kind == "cwt":
         return SmallCWT2DCNN()
+    if kind in {"spectrogram", "matlab_spectrogram"}:
+        return SmallSpectrogram2DCNN()
     if kind in {"v4_temporal", "geometry_adapted_temporal"}:
         return V4MultiScaleTemporalCNN()
     if kind in {"v4_cwt", "geometry_adapted_cwt"}:

@@ -70,6 +70,23 @@ class PulseCWTEncoder(nn.Module):
         return self.projection(self.features(values).flatten(1))
 
 
+class PulseSpectrogramEncoder(nn.Module):
+    """Compact 24/48 residual encoder for local STFT pulse views."""
+
+    def __init__(self, embedding_size: int = 64) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 24, 3, padding=1), nn.BatchNorm2d(24), nn.GELU(), nn.MaxPool2d(2),
+            _Residual2D(24), nn.MaxPool2d(2),
+            nn.Conv2d(24, 48, 3, padding=1), nn.BatchNorm2d(48), nn.GELU(),
+            _Residual2D(48), nn.AdaptiveAvgPool2d(1),
+        )
+        self.projection = nn.Sequential(nn.Linear(48, embedding_size), nn.GELU())
+
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        return self.projection(self.features(values).flatten(1))
+
+
 def _masked_pool(
     logits: torch.Tensor,
     mask: torch.Tensor,
@@ -121,8 +138,8 @@ class PulseBagExpert(nn.Module):
         cycle_weight: float = 0.10,
     ) -> None:
         super().__init__()
-        if representation not in {"temporal", "cwt"}:
-            raise ValueError("representation must be 'temporal' or 'cwt'")
+        if representation not in {"temporal", "cwt", "spectrogram"}:
+            raise ValueError("representation must be 'temporal', 'cwt', or 'spectrogram'")
         if not 0.0 < top_k_fraction <= 1.0:
             raise ValueError("top_k_fraction must be in (0, 1]")
         if cycle_weight < 0:
@@ -132,7 +149,11 @@ class PulseBagExpert(nn.Module):
         self.top_k_fraction = float(top_k_fraction)
         self.cycle_consistency = bool(cycle_consistency)
         self.cycle_weight = float(cycle_weight)
-        self.encoder = PulseTemporalEncoder() if representation == "temporal" else PulseCWTEncoder()
+        self.encoder = (
+            PulseTemporalEncoder() if representation == "temporal"
+            else PulseCWTEncoder() if representation == "cwt"
+            else PulseSpectrogramEncoder()
+        )
         self.classifier = nn.Linear(64, 1)
 
     def forward(
@@ -156,7 +177,7 @@ class PulseBagExpert(nn.Module):
                 raise ValueError("Temporal pulse bags must be [batch, halves, pulses, 1, time]")
         else:
             if values.ndim != 6 or values.shape[3] != 1:
-                raise ValueError("CWT pulse bags must be [batch, halves, pulses, 1, scales, time]")
+                raise ValueError("2D pulse bags must be [batch, halves, pulses, 1, frequency, time]")
         flat = values.reshape(batch * halves * pulses, *values.shape[3:])
         embeddings = self.encoder(flat).reshape(batch, halves, pulses, -1)
         pulse_logits = self.classifier(embeddings).squeeze(-1)

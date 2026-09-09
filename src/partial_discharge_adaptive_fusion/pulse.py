@@ -15,6 +15,51 @@ from .pulse_impl import (
 
 
 @dataclass(frozen=True)
+class STFTEventBag:
+    """Non-wrapping local segments for the two VSB half-cycles."""
+
+    segments: np.ndarray
+    valid_mask: np.ndarray
+    peak_indices: np.ndarray
+    reference: CycleReference
+
+
+def prepare_v5_stft_event_bag(
+    signal: np.ndarray,
+    policy: PulsePolicy,
+    *,
+    segment_length: int = 512,
+    capacity: int = 86,
+) -> STFTEventBag:
+    """Extract ranked, fully in-bounds flattened segments without circular wrapping."""
+
+    if segment_length < 2 or capacity < 1:
+        raise ValueError("segment_length and capacity must be positive")
+    detected = detect_pulses(signal, policy)
+    segments = np.zeros((2, capacity, segment_length), dtype=np.float32)
+    valid_mask = np.zeros((2, capacity), dtype=bool)
+    peak_indices = np.full((2, capacity), -1, dtype=np.int64)
+    half_width = segment_length // 2
+    flattened = np.asarray(detected.flattened_signal, dtype=np.float32)
+    for half_index, peaks in enumerate(detected.peak_indices):
+        output_index = 0
+        for center in peaks:
+            start = int(center) - half_width
+            stop = start + segment_length
+            if start < 0 or stop > len(flattened):
+                continue
+            segments[half_index, output_index] = flattened[start:stop]
+            peak_indices[half_index, output_index] = int(center)
+            valid_mask[half_index, output_index] = True
+            output_index += 1
+            if output_index == capacity:
+                break
+        if output_index == 0:
+            raise ValueError(f"No fully in-bounds VSB events for half-cycle {half_index}")
+    return STFTEventBag(segments, valid_mask, peak_indices, detected.reference)
+
+
+@dataclass(frozen=True)
 class CycleReference(_impl.CycleReference):
     """Cycle landmarks, including whether one landmark was inferred."""
 
