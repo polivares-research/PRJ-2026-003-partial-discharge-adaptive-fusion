@@ -200,6 +200,22 @@ def _sigmoid(logits: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(np.asarray(logits, dtype=float), -40, 40)))
 
 
+def _markdown_table(frame: pd.DataFrame) -> str:
+    """Render a small Markdown table without the optional tabulate package."""
+
+    if frame.empty:
+        return "(no rows)"
+    columns = [str(column) for column in frame.columns]
+    lines = ["| " + " | ".join(columns) + " |", "| " + " | ".join("---" for _ in columns) + " |"]
+    for _, row in frame.iterrows():
+        values = []
+        for column in frame.columns:
+            value = row[column]
+            values.append(str(value).replace("|", "\\|"))
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines)
+
+
 def _final_neural_predictions(train_x: np.ndarray, train_y: np.ndarray, validation_x: np.ndarray, validation_y: np.ndarray, *, kind: str, seed: int, epochs: int, batch_size: int = 4) -> np.ndarray:
     result = train_expert(train_x, train_y, validation_x, validation_y, kind=kind, seed=seed, epochs=epochs, batch_size=batch_size, pos_weight=positive_class_weight(train_y), train_indices=np.arange(len(train_y)), validation_indices=np.arange(len(validation_y)), validation_batch_size=32, num_workers=0, persistent_workers=False, mixed_precision=False)
     loader = __import__("torch").utils.data.DataLoader(NumpyDataset(validation_x, validation_y), batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
@@ -240,10 +256,10 @@ def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, outp
         temporal_val = _final_neural_predictions(mat_temporal_train, train_mat.label, mat_temporal_val, val_mat.label, kind="temporal", seed=int(seed), epochs=5)
         spec_val = _final_neural_predictions(mat_spec_train, train_mat.label, mat_spec_val, val_mat.label, kind="spectrogram", seed=int(seed), epochs=5)
         rows.extend([
-            pd.DataFrame({"dataset": "matlab", "split": "train_oof", "sample_id": train_mat.sample_id, "id_measurement": train_mat.sample_id, "phase": "NA", "target": train_mat.label, "method": "temporal", "seed": seed, "probability": _sigmoid(temporal_oof), "threshold": temporal_threshold}),
-            pd.DataFrame({"dataset": "matlab", "split": "validation", "sample_id": val_mat.sample_id, "id_measurement": val_mat.sample_id, "phase": "NA", "target": val_mat.label, "method": "temporal", "seed": seed, "probability": temporal_val, "threshold": temporal_threshold}),
-            pd.DataFrame({"dataset": "matlab", "split": "train_oof", "sample_id": train_mat.sample_id, "id_measurement": train_mat.sample_id, "phase": "NA", "target": train_mat.label, "method": "spectrogram", "seed": seed, "probability": _sigmoid(spec_oof), "threshold": spec_threshold}),
-            pd.DataFrame({"dataset": "matlab", "split": "validation", "sample_id": val_mat.sample_id, "id_measurement": val_mat.sample_id, "phase": "NA", "target": val_mat.label, "method": "spectrogram", "seed": seed, "probability": spec_val, "threshold": spec_threshold}),
+            pd.DataFrame({"dataset": "matlab", "split": "train_oof", "sample_id": train_mat.sample_id, "id_measurement": train_mat.sample_id, "phase": "NA", "target": train_mat.label, "method": "temporal", "seed": seed, "probability": _sigmoid(temporal_oof), "prediction": (_sigmoid(temporal_oof) >= temporal_threshold).astype(int), "threshold": temporal_threshold}),
+            pd.DataFrame({"dataset": "matlab", "split": "validation", "sample_id": val_mat.sample_id, "id_measurement": val_mat.sample_id, "phase": "NA", "target": val_mat.label, "method": "temporal", "seed": seed, "probability": temporal_val, "prediction": (temporal_val >= temporal_threshold).astype(int), "threshold": temporal_threshold}),
+            pd.DataFrame({"dataset": "matlab", "split": "train_oof", "sample_id": train_mat.sample_id, "id_measurement": train_mat.sample_id, "phase": "NA", "target": train_mat.label, "method": "spectrogram", "seed": seed, "probability": _sigmoid(spec_oof), "prediction": (_sigmoid(spec_oof) >= spec_threshold).astype(int), "threshold": spec_threshold}),
+            pd.DataFrame({"dataset": "matlab", "split": "validation", "sample_id": val_mat.sample_id, "id_measurement": val_mat.sample_id, "phase": "NA", "target": val_mat.label, "method": "spectrogram", "seed": seed, "probability": spec_val, "prediction": (spec_val >= spec_threshold).astype(int), "threshold": spec_threshold}),
         ])
         logger.info("MATLAB seed %d experts ready", seed)
     frame, canonical = prepare_forensic_baseline_frame(audit_root)
@@ -298,6 +314,19 @@ def stage_evaluation(config: dict[str, Any], output: Path, logger: logging.Logge
         raise RuntimeError("Run experts before evaluation")
     started = time.perf_counter()
     predictions = pd.read_parquet(output / "validation_predictions.parquet")
+    if "prediction" not in predictions.columns:
+        predictions["prediction"] = np.nan
+    missing_prediction = predictions["prediction"].isna()
+    if missing_prediction.any():
+        predictions.loc[missing_prediction, "prediction"] = (
+            predictions.loc[missing_prediction, "probability"]
+            >= predictions.loc[missing_prediction, "threshold"]
+        ).astype(np.int64)
+        predictions.to_parquet(output / "validation_predictions.parquet", index=False)
+    if not np.isfinite(predictions["probability"].to_numpy(dtype=float)).all():
+        raise RuntimeError("Validation predictions contain non-finite probabilities")
+    if not predictions["prediction"].isin([0, 1]).all():
+        raise RuntimeError("Validation predictions must be binary after thresholding")
     metric_rows: list[dict[str, Any]] = []
     overlap_rows: list[dict[str, Any]] = []
     for (dataset, seed), group in predictions[predictions["split"] == "validation"].groupby(["dataset", "seed"], sort=True):
@@ -332,7 +361,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
             if dataset == "vsb": summary["vsb_spectrogram_strong"] = float(values.mean()) >= 0.60 and float(values.min()) > 0.55
             else: summary["matlab_spectrogram_strong"] = float(values.mean()) >= 0.95 and float(values.min()) >= 0.93
     summary["verdict"] = classify_cross_dataset_verdict(summary)
-    report = ["# Cross-Dataset Temporal vs Spectrogram Diagnostic", "", f"**Verdict:** `{summary['verdict']}`", "", "## OBSERVED", "", "This development-only report uses MATLAB Tr1/Va1 and VSB grouped development identities. VSB grouped test, official test, MATLAB Te1/Te2, CWT reruns, and adaptive fusion were not opened.", "", "### Validation metrics", "", metrics.to_markdown(index=False), "", "### Prediction overlap", "", overlaps.to_markdown(index=False), "", "## INTERPRETATION", "", "The verdict is registered only after integrity, split, cache, alignment, and temporal regression checks. Fixed mixtures are diagnostic-only.", "", "## UNRESOLVED", "", "Dual-CyCon frequency concepts are verified only at high level. Erişti and exact reported literature values remain PROJECT LITERATURE ANCHOR — NOT REVERIFIED."]
+    report = ["# Cross-Dataset Temporal vs Spectrogram Diagnostic", "", f"**Verdict:** `{summary['verdict']}`", "", "## OBSERVED", "", "This development-only report uses MATLAB Tr1/Va1 and VSB grouped development identities. VSB grouped test, official test, MATLAB Te1/Te2, CWT reruns, and adaptive fusion were not opened.", "", "### Validation metrics", "", _markdown_table(metrics), "", "### Prediction overlap", "", _markdown_table(overlaps), "", "## INTERPRETATION", "", "The verdict is registered only after integrity, split, cache, alignment, and temporal regression checks. Fixed mixtures are diagnostic-only.", "", "## UNRESOLVED", "", "Dual-CyCon frequency concepts are verified only at high level. Erişti and exact reported literature values remain PROJECT LITERATURE ANCHOR — NOT REVERIFIED."]
     report_path = ROOT / config["outputs"]["report"]
     report_path.parent.mkdir(parents=True, exist_ok=True); report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
     atomic_json(ROOT / config["outputs"]["summary"], {"diagnostic": "Cross-Dataset Temporal vs Spectrogram", **summary, "metrics": metrics.to_dict(orient="records"), "overlap": overlaps.to_dict(orient="records")})
