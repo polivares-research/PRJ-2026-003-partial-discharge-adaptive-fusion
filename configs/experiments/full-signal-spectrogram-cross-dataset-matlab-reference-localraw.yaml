@@ -1,0 +1,75 @@
+config_version: full-signal-spectrogram-cross-dataset-matlab-reference-v1
+parent_config_version: full-signal-spectrogram-cross-dataset-v1
+protocol_status: development_only
+branch_contract: diagnostic/full-signal-spectrogram-cross-dataset
+mode: matlab_historical_reference_only
+objective: reproduce the historical MATLAB temporal development reference before interpreting the global spectrogram comparison
+data_contract:
+  source_type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+  researchdata: forbidden
+  dropbox: forbidden
+scope:
+  datasets: [matlab, vsb]
+  seeds: [42, 43, 44]
+  target: phase_signal_target
+  holdouts: forbidden
+  matlab_partitions: [Tr1.mat, Va1.mat]
+  vsb_predictions: reused_from_completed_full_signal_experts
+  forbidden: [MATLAB Te1, MATLAB Te2, VSB grouped test, VSB official test, CWT reruns, adaptive fusion, reliability models]
+historical_matlab_reference:
+  status: registered_reference_reproduction
+  architecture: TinyTemporalCNN
+  temporal_epochs: 9
+  batch_size: 4
+  inference_batch_size: 4
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  epoch_selection: validation
+  normalization: full_Tr1_before_OOF
+  oof_folds: 5
+  fold_seed: 42
+  positive_weight: none
+  holdouts_opened: []
+diagnostics:
+  fixed_weights: [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+  include_fifty_fifty: true
+  verdict_determining: false
+regression:
+  vsb_temporal:
+    tolerance_mcc: 1.0e-6
+    tolerance_threshold: 1.0e-12
+    expected:
+      42: {mcc: 0.6288553457492239, threshold: 0.265}
+      43: {mcc: 0.6225752546362788, threshold: 0.105}
+      44: {mcc: 0.6512036719499463, threshold: 0.195}
+  matlab_temporal:
+    tolerance_mcc: 0.005
+    tolerance_threshold: 0.01
+    expected:
+      42: {mcc: 0.9583519445260205, threshold: 0.095}
+      43: {mcc: 0.9699803927462562, threshold: 0.15}
+      44: {mcc: 0.971595033733952, threshold: 0.13}
+  matlab_historical_cwt_context: {42: 0.985578, 43: 0.982167, 44: 0.982616}
+verdict:
+  meaningful_oracle_headroom: 0.010
+  minimum_headroom_seeds: 2
+  minimum_headroom_per_seed: 0.005
+  aggregate_ci_lower_bound: 0.0
+  vsb_strong_mean_mcc: 0.60
+  vsb_strong_min_mcc: 0.40
+  matlab_strong_mean_mcc: 0.95
+  matlab_strong_min_mcc: 0.93
+historical_sources:
+  matlab_metrics: reports/metrics/v3-windowed/matlab_per_seed.csv
+  vsb_metrics: reports/metrics/v3-windowed/vsb_per_seed.csv
+  local_event_report: reports/audits/temporal_spectrogram_cross_dataset_diagnostic_v2_repaired.json
+outputs:
+  cache_root: results/cache/full-signal-spectrogram-cross-dataset
+  audit_root: results/audits/full-signal-spectrogram-cross-dataset-matlab-reference
+  figures: reports/figures/full-signal-spectrogram-cross-dataset-matlab-reference
+  report: reports/audits/full_signal_spectrogram_cross_dataset_matlab_reference_diagnostic.md
+  summary: reports/audits/full_signal_spectrogram_cross_dataset_matlab_reference_diagnostic.json
+  manifest: reports/audits/full_signal_spectrogram_cross_dataset_matlab_reference_manifest.md
+  base_output_root: results/audits/full-signal-spectrogram-cross-dataset

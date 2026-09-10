@@ -407,6 +407,107 @@ def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, outp
     logger.info("experts PASS: prediction rows=%d", len(predictions))
 
 
+def stage_matlab_reference(
+    config: dict[str, Any],
+    raw_root: Path,
+    output: Path,
+    base_output: Path,
+    logger: logging.Logger,
+) -> None:
+    """Regenerate only MATLAB temporal rows with the historical protocol.
+
+    This is intentionally separate from the primary fold-local diagnostic. The
+    historical MATLAB reference standardized all Tr1 signals once before OOF,
+    used nine temporal epochs, and selected the final epoch on Va1. The output
+    is merged with the already completed global-diagnostic predictions under a
+    new namespace; the original output is never overwritten.
+    """
+
+    if complete(output, "experts"):
+        logger.info("MATLAB reference experts already complete; reusing predictions")
+        return
+    base_predictions_path = base_output / "validation_predictions.parquet"
+    if not (base_output / "experts.complete").is_file() or not base_predictions_path.is_file():
+        raise RuntimeError("The base full-signal experts output is required before MATLAB reference regeneration")
+    started = time.perf_counter()
+    matlab, _ = _datasets(raw_root)
+    train_mat, val_mat = load_mat_partition(matlab, "Tr1.mat"), load_mat_partition(matlab, "Va1.mat")
+    reference = config["historical_matlab_reference"]
+    epochs = int(reference["temporal_epochs"])
+    batch_size = int(reference["batch_size"])
+    inference_batch_size = int(reference["inference_batch_size"])
+    if reference.get("epoch_selection") != "validation" or reference.get("normalization") != "full_Tr1_before_OOF":
+        raise RuntimeError("The MATLAB reference configuration is not the registered historical protocol")
+    standardizer = fit_standardizer(train_mat.signal, axis=0)
+    train_temporal = temporal_input(train_mat.signal, standardizer)
+    validation_temporal = temporal_input(val_mat.signal, standardizer)
+    folds = fold_assignments(train_mat.label, n_splits=5, seed=42)
+    rows: list[pd.DataFrame] = []
+    train_base = pd.DataFrame({"sample_id": train_mat.sample_id.astype(str), "id_measurement": train_mat.sample_id.astype(str), "phase": "NA", "target": train_mat.label})
+    validation_base = pd.DataFrame({"sample_id": val_mat.sample_id.astype(str), "id_measurement": val_mat.sample_id.astype(str), "phase": "NA", "target": val_mat.label})
+    reference_records: list[dict[str, Any]] = []
+    import torch
+    from torch.utils.data import DataLoader
+
+    for seed in [int(value) for value in config["scope"]["seeds"]]:
+        logger.info("MATLAB historical reference seed %d temporal OOF", seed)
+        oof = cross_fitted_logits(
+            train_temporal, train_mat.label, kind="temporal", folds=folds, seed=seed,
+            epochs=epochs, batch_size=batch_size, validation_batch_size=inference_batch_size,
+            num_workers=0, persistent_workers=False, mixed_precision=False,
+            epoch_selection="validation",
+        ).logits
+        result = train_expert(
+            train_temporal, train_mat.label, validation_temporal, val_mat.label,
+            kind="temporal", seed=seed, epochs=epochs, batch_size=batch_size,
+            pos_weight=None, learning_rate=1e-3, weight_decay=1e-4,
+            validation_batch_size=inference_batch_size, num_workers=0,
+            persistent_workers=False, mixed_precision=False, epoch_selection="validation",
+        )
+        loader = DataLoader(
+            NumpyDataset(validation_temporal, val_mat.label), batch_size=inference_batch_size,
+            shuffle=False, num_workers=0, pin_memory=True,
+        )
+        validation_logits = predict_logits(result.model, loader, device=None, mixed_precision=False)
+        oof_probability, validation_probability = _sigmoid(oof), _sigmoid(validation_logits)
+        threshold = select_threshold(train_mat.label, oof_probability)
+        _append_prediction_rows(rows, train_base, oof_probability, threshold, dataset="matlab", split="train_oof", method="temporal", seed=seed)
+        _append_prediction_rows(rows, validation_base, validation_probability, threshold, dataset="matlab", split="validation", method="temporal", seed=seed)
+        reference_records.append({
+            "seed": seed,
+            "threshold": threshold,
+            "metrics": binary_metrics(val_mat.label, validation_probability, threshold),
+            "best_epoch": int(result.best_epoch),
+            "normalization": "full_Tr1_before_OOF",
+            "epoch_selection": "validation",
+        })
+        del result
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("MATLAB historical reference seed %d ready: MCC=%.6f threshold=%.3f", seed, reference_records[-1]["metrics"]["mcc"], threshold)
+
+    base_predictions = pd.read_parquet(base_predictions_path)
+    replacement_ids = set(train_base["sample_id"]) | set(validation_base["sample_id"])
+    keep = ~(
+        base_predictions["dataset"].eq("matlab")
+        & base_predictions["method"].eq("temporal")
+        & base_predictions["sample_id"].isin(replacement_ids)
+    )
+    merged = pd.concat([base_predictions.loc[keep], *rows], ignore_index=True)
+    merged.to_parquet(output / "validation_predictions.parquet", index=False)
+    atomic_json(output / "matlab_reference.json", {
+        "status": "PASS", "protocol": reference, "records": reference_records,
+        "source_base_output": str(base_output), "prediction_rows": int(len(merged)),
+        "holdouts_opened": [], "elapsed_seconds": time.perf_counter() - started,
+    })
+    finish(output, "experts", {
+        "status": "PASS", "mode": "matlab_historical_reference_only",
+        "prediction_rows": int(len(merged)), "source_base_output": str(base_output),
+        "holdouts_opened": [], "elapsed_seconds": time.perf_counter() - started,
+    })
+    logger.info("MATLAB reference PASS: merged prediction rows=%d", len(merged))
+
+
 def _metric_rows(predictions: pd.DataFrame) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     metrics, overlaps, bootstraps = [], [], []
     for (dataset, seed), group in predictions[predictions["split"] == "validation"].groupby(["dataset", "seed"], sort=True):
@@ -603,7 +704,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
         "The result is intended to distinguish a representation limitation from the prior local-event implementation; it does not constitute adaptive fusion confirmation.", "",
         "Historical CWT and local-event values are reported only as validation-set context. Any historical CSV rows labelled as holdout/test are excluded from this report.", "",
         "## UNRESOLVED", "",
-        "The experiment is not executed by the implementation turn. Historical local-event and CWT results remain contextual and are not rerun here. Literature frequency concepts are not treated as a direct reproduction.", "",
+        "The historical local-event and CWT results remain contextual and are not rerun here. Literature frequency concepts are not treated as a direct reproduction.", "",
         "## Reproducibility", "",
         "Raw data are accessed only through `PD_RAW_DATA_ROOT` and all generated arrays are versioned under the full-signal diagnostic namespace.",
     ]
@@ -623,15 +724,20 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--raw-root", type=Path, required=True)
-    parser.add_argument("--stage", choices=["preflight", "cache", "experts", "evaluation", "report", "all"], default="all")
+    parser.add_argument("--stage", choices=["preflight", "cache", "experts", "matlab_reference", "evaluation", "report", "all"], default="all")
     parser.add_argument("--output-root", type=Path)
     parser.add_argument("--cache-root", type=Path)
+    parser.add_argument("--base-output-root", type=Path, help="Completed full-signal output used by matlab_reference")
     parser.add_argument("--audit-root", type=Path, default=Path("results/audits/vsb-literature-forensic"))
     parser.add_argument("--log-file", type=Path)
     args = parser.parse_args()
     config = load_config(args.config)
     output = args.output_root or ROOT / config["outputs"]["audit_root"]
     cache = args.cache_root or ROOT / config["outputs"]["cache_root"]
+    configured_base = config["outputs"].get("base_output_root")
+    base_output = args.base_output_root or (ROOT / configured_base if configured_base else None)
+    if args.stage == "matlab_reference" and base_output is None:
+        parser.error("--base-output-root is required for matlab_reference")
     audit_root = args.audit_root if args.audit_root.is_absolute() else ROOT / args.audit_root
     logger = make_logger(args.log_file)
     stages = ["preflight", "cache", "experts", "evaluation", "report"] if args.stage == "all" else [args.stage]
@@ -639,6 +745,10 @@ def main() -> int:
         "preflight": lambda: stage_preflight(config, args.raw_root.resolve(), audit_root, output, logger),
         "cache": lambda: stage_cache(config, args.raw_root.resolve(), audit_root, output, cache, logger),
         "experts": lambda: stage_experts(config, args.raw_root.resolve(), audit_root, output, cache, logger),
+        "matlab_reference": lambda: stage_matlab_reference(
+            config, args.raw_root.resolve(), output,
+            base_output, logger,
+        ),
         "evaluation": lambda: stage_evaluation(config, output, logger),
         "report": lambda: stage_report(config, output, logger),
     }
