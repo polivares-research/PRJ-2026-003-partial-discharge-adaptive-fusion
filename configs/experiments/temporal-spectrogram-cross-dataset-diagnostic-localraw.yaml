@@ -1,0 +1,120 @@
+config_version: temporal-spectrogram-cross-dataset-diagnostic-v2-repaired
+protocol_status: development_only
+branch_contract: diagnostic/temporal-spectrogram-cross-dataset
+objective: compare frozen temporal and natural-log-power STFT representations across MATLAB and VSB
+data_contract:
+  source_type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+  researchdata: forbidden
+  dropbox: forbidden
+scope:
+  datasets: [matlab, vsb]
+  seeds: [42, 43, 44]
+  target: phase_signal_target
+  holdouts: forbidden
+  matlab_partitions: [Tr1.mat, Va1.mat]
+  vsb_split: fixed_forensic_train_validation
+  forbidden: [VSB grouped test, VSB official test, MATLAB Te1, MATLAB Te2, CWT reruns, external weights, adaptive fusion, reliability models]
+stft:
+  common:
+    window: hann
+    center: false
+    onesided: true
+    power: abs_squared
+    log_epsilon: 1.0e-8
+    cache_dtype: float16
+  matlab:
+    signal_length: 400
+    win_length: 64
+    n_fft: 128
+    hop_length: 16
+    expected_shape: [1, 65, 22]
+    frequency_axis: normalized_cycles_per_sample
+  vsb:
+    segment_length: 512
+    win_length: 128
+    n_fft: 128
+    hop_length: 32
+    expected_shape: [2, 86, 1, 65, 13]
+    frequency_axis: 0_to_20_MHz_at_312.5_kHz_bins
+representations:
+  matlab_temporal: TinyTemporalCNN
+  matlab_spectrogram: SmallSpectrogram2DCNN
+  vsb_temporal: forensic_S_plus_T_HistGradientBoosting_145_predictors
+  vsb_spectrogram: PulseSpectrogramEncoder_24_48_channels_embedding_64
+  vsb_detector: v5_current_frozen_max_86_events_per_half_cycle
+  vsb_aggregation: top_10_percent_per_half_cycle_then_mean
+normalization:
+  mode: per_frequency_time_bin
+  fit_scope: train_only_relevant_fold
+  raw_cache: unnormalized_float16
+  oof_standardizer: fit_on_outer_train_fold_only
+  final_standardizer: fit_on_complete_train_only
+  cwt_rerun: forbidden
+training:
+  epoch_selection: fixed_registered_epochs
+  outer_validation_epoch_selection: forbidden
+  matlab_temporal_epochs: 5
+  vsb_spectrogram:
+    epochs: 7
+    batch_size: 8
+    inference_batch_size: 32
+    learning_rate: 0.001
+    weight_decay: 0.0001
+    mixed_precision: false
+  matlab_spectrogram:
+    epochs: 5
+  dataloader:
+    num_workers: 0
+    persistent_workers: false
+    pin_memory: true
+    prefetch_factor: null
+thresholds:
+  start: 0.05
+  stop: 0.95
+  step: 0.005
+  selection_source: train_oof_only
+statistics:
+  primary_metric: MCC
+  paired_bootstrap_iterations: 10000
+  aggregate: hierarchical_three_seed
+  matlab_bootstrap_unit: signal
+  vsb_bootstrap_unit: id_measurement
+  bootstrap_seed: 42042
+diagnostics:
+  fixed_weights: [0.00, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00]
+  include_fifty_fifty: true
+  verdict_determining: false
+regression:
+  vsb_temporal:
+    tolerance_mcc: 1.0e-6
+    tolerance_threshold: 1.0e-12
+    expected:
+      42: {mcc: 0.6288553457492239, threshold: 0.265}
+      43: {mcc: 0.6225752546362788, threshold: 0.105}
+      44: {mcc: 0.6512036719499463, threshold: 0.195}
+  matlab_temporal:
+    tolerance_mcc: 0.005
+    tolerance_threshold: 0.01
+    expected:
+      42: {mcc: 0.9583519445260205, threshold: 0.095}
+      43: {mcc: 0.9699803927462562, threshold: 0.15}
+      44: {mcc: 0.971595033733952, threshold: 0.13}
+  matlab_historical_cwt_context: {42: 0.985578, 43: 0.982167, 44: 0.982616}
+verdict:
+  meaningful_oracle_headroom: 0.010
+  minimum_headroom_seeds: 2
+  minimum_headroom_per_seed: 0.005
+  aggregate_ci_lower_bound: 0.0
+  vsb_strong_mean_mcc: 0.60
+  vsb_strong_min_mcc: 0.55
+  matlab_strong_mean_mcc: 0.95
+  matlab_strong_min_mcc: 0.93
+outputs:
+  cache_root: results/cache/temporal-spectrogram-cross-dataset
+  audit_root: results/audits/temporal-spectrogram-cross-dataset-v2-repaired
+  figures: reports/figures/temporal-spectrogram-cross-dataset-v2-repaired
+  report: reports/audits/temporal_spectrogram_cross_dataset_diagnostic_v2_repaired.md
+  summary: reports/audits/temporal_spectrogram_cross_dataset_diagnostic_v2_repaired.json
+  manifest: reports/audits/temporal_spectrogram_cross_dataset_manifest_v2_repaired.md

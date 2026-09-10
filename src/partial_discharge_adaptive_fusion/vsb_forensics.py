@@ -764,6 +764,11 @@ def evaluate_feature_baseline_with_predictions(
     prediction_frame["id_measurement"] = prediction_frame["id_measurement"].astype(str)
     prediction_frame["probability"] = probabilities.astype(float)
     prediction_frame["prediction"] = predictions
+    oof_frame = train[["sample_id", "id_measurement", "phase", "target"]].copy()
+    oof_frame["sample_id"] = oof_frame["sample_id"].astype(str)
+    oof_frame["id_measurement"] = oof_frame["id_measurement"].astype(str)
+    oof_frame["probability"] = oof.astype(float)
+    oof_frame["prediction"] = (oof >= threshold).astype(np.int64)
     return {
         "classifier": classifier,
         "seed": int(seed),
@@ -774,6 +779,7 @@ def evaluate_feature_baseline_with_predictions(
         "n_features": int(len(columns)),
         "threshold_from_train_oof": threshold,
         "metrics": metrics,
+        "train_oof_predictions": oof_frame,
         "validation_predictions": prediction_frame,
     }
 

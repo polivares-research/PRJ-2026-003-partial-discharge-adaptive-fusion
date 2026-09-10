@@ -44,6 +44,7 @@ def binary_metrics(labels: np.ndarray, probability: np.ndarray, threshold: float
         "roc_auc": roc_auc,
         "brier": float(brier_score_loss(labels, probability)),
         "ece_10_bins": expected_calibration_error(labels, probability),
+        "predicted_positive_fraction": float(np.mean(prediction)),
         "tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp),
         "errors": int(fp + fn),
     }
@@ -255,3 +256,80 @@ def hierarchical_grouped_delta_ci(
         "iterations": int(iterations),
         "seed_count": int(len(records)),
     }
+
+
+def hierarchical_paired_delta_ci(
+    seed_predictions: Iterable[dict[str, np.ndarray]],
+    comparison: str,
+    *,
+    iterations: int = 10_000,
+    seed: int = 42,
+) -> dict[str, object]:
+    """Hierarchical paired bootstrap for independent-signal MATLAB seeds."""
+
+    records = list(seed_predictions)
+    if not records:
+        raise ValueError("At least one seed prediction record is required")
+    child_seeds = np.random.SeedSequence(seed).spawn(len(records))
+    values: list[np.ndarray] = []
+    points: list[float] = []
+    for record, child in zip(records, child_seeds):
+        labels = np.asarray(record["labels"], dtype=np.int64)
+        prediction_a = np.asarray(record["prediction_a"], dtype=np.int64)
+        prediction_b = np.asarray(record["prediction_b"], dtype=np.int64)
+        if not (len(labels) == len(prediction_a) == len(prediction_b)):
+            raise ValueError("Hierarchical paired bootstrap inputs are not aligned")
+        deltas = _paired_bootstrap_values(
+            labels, prediction_a, prediction_b, iterations=iterations,
+            seed=int(child.generate_state(1)[0]),
+        )
+        values.append(deltas)
+        points.append(fast_mcc(labels, prediction_a) - fast_mcc(labels, prediction_b))
+    aggregate = np.mean(np.vstack(values), axis=0)
+    return {
+        "comparison": comparison,
+        "point_estimate": float(np.mean(points)),
+        "bootstrap_mean": float(aggregate.mean()),
+        "ci_95": [float(np.quantile(aggregate, 0.025)), float(np.quantile(aggregate, 0.975))],
+        "fraction_gt_zero": float(np.mean(aggregate > 0)),
+        "iterations": int(iterations),
+        "seed_count": int(len(records)),
+        "bootstrap_unit": "individual_signal",
+    }
+
+
+def _paired_bootstrap_values(
+    labels: np.ndarray,
+    prediction_a: np.ndarray,
+    prediction_b: np.ndarray,
+    *,
+    iterations: int,
+    seed: int,
+) -> np.ndarray:
+    """Memory-bounded individual-signal paired bootstrap replicates."""
+
+    labels = np.asarray(labels, dtype=np.int64)
+    prediction_a = np.asarray(prediction_a, dtype=np.int64)
+    prediction_b = np.asarray(prediction_b, dtype=np.int64)
+    if len(labels) == 0 or not (len(labels) == len(prediction_a) == len(prediction_b)):
+        raise ValueError("Paired bootstrap inputs must be non-empty and equally sized")
+    categories = labels * 4 + prediction_a * 2 + prediction_b
+    observed = np.bincount(categories, minlength=8).astype(np.float64)
+    probabilities = observed / len(labels)
+    rng = np.random.default_rng(seed)
+    values = np.empty(iterations, dtype=np.float64)
+    for start in range(0, iterations, 256):
+        stop = min(iterations, start + 256)
+        counts = rng.multinomial(len(labels), probabilities, size=stop - start).astype(np.float64)
+        labels_one = counts[:, 4:8].sum(axis=1)
+        labels_zero = counts[:, :4].sum(axis=1)
+        tp_a, fp_a = counts[:, 6] + counts[:, 7], counts[:, 2] + counts[:, 3]
+        tp_b, fp_b = counts[:, 5] + counts[:, 7], counts[:, 1] + counts[:, 3]
+        fn_a, fn_b = labels_one - tp_a, labels_one - tp_b
+        tn_a, tn_b = labels_zero - fp_a, labels_zero - fp_b
+        den_a = np.sqrt((tp_a + fp_a) * (tp_a + fn_a) * (tn_a + fp_a) * (tn_a + fn_a))
+        den_b = np.sqrt((tp_b + fp_b) * (tp_b + fn_b) * (tn_b + fp_b) * (tn_b + fn_b))
+        mcc_a = np.divide(tp_a * tn_a - fp_a * fn_a, den_a, out=np.zeros_like(den_a), where=den_a != 0)
+        mcc_b = np.divide(tp_b * tn_b - fp_b * fn_b, den_b, out=np.zeros_like(den_b), where=den_b != 0)
+        values[start:stop] = mcc_a - mcc_b
+    return values
