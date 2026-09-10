@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import logging
 import sys
@@ -23,13 +24,16 @@ from partial_discharge_adaptive_fusion.config import raw_data_root, require_cuda
 from partial_discharge_adaptive_fusion.dataset import (  # noqa: E402
     iter_vsb_signal_batches, load_mat_partition, load_vsb_metadata, resolve_dataset,
 )
-from partial_discharge_adaptive_fusion.evaluation import binary_metrics  # noqa: E402
+from partial_discharge_adaptive_fusion.evaluation import (  # noqa: E402
+    binary_metrics, grouped_paired_bootstrap_delta, hierarchical_grouped_delta_ci,
+    hierarchical_paired_delta_ci, paired_bootstrap_delta,
+)
 from partial_discharge_adaptive_fusion.fusion import select_threshold  # noqa: E402
 from partial_discharge_adaptive_fusion.modeling.data import NumpyDataset  # noqa: E402
 from partial_discharge_adaptive_fusion.modeling.train import predict_logits  # noqa: E402
 from partial_discharge_adaptive_fusion.modeling.pulse_data import PulseBagDataset  # noqa: E402
 from partial_discharge_adaptive_fusion.modeling.pulse_train import (  # noqa: E402
-    _loader as pulse_loader, cross_fitted_pulse_logits, predict_pulse_logits, train_pulse_expert,
+    _loader as pulse_loader, cross_fitted_pulse_logits, predict_pulse_outputs, train_pulse_expert,
 )
 from partial_discharge_adaptive_fusion.modeling.train import (  # noqa: E402
     cross_fitted_logits, fold_assignments, positive_class_weight, train_expert,
@@ -38,11 +42,12 @@ from partial_discharge_adaptive_fusion.pulse_impl import PulsePolicy  # noqa: E4
 from partial_discharge_adaptive_fusion.protocol import MATLAB_DATASET_ID, VSB_DATASET_ID  # noqa: E402
 from partial_discharge_adaptive_fusion.representations import fit_standardizer, temporal_input  # noqa: E402
 from partial_discharge_adaptive_fusion.spectrogram import (  # noqa: E402
-    STFTSpec, build_matlab_spectrogram_dataset, build_vsb_event_spectrogram_dataset,
+    IndexedArrayView, STFTSpec, build_matlab_spectrogram_dataset, build_vsb_event_spectrogram_dataset,
     compute_stft_log_power, fit_spectrogram_standardizer, write_atomic_array_cache,
 )
 from partial_discharge_adaptive_fusion.temporal_spectrogram import (  # noqa: E402
-    classify_cross_dataset_verdict, fixed_probability_diagnostics, prediction_overlap_oracle,
+    classify_cross_dataset_verdict, prediction_overlap_oracle, probability_summary,
+    select_fixed_weight_oof, threshold_curve,
 )
 from partial_discharge_adaptive_fusion.vsb_forensics import (  # noqa: E402
     evaluate_feature_baseline_with_predictions, prepare_forensic_baseline_frame,
@@ -52,6 +57,10 @@ from partial_discharge_adaptive_fusion.vsb_modality import (  # noqa: E402
 )
 
 START = time.perf_counter()
+
+
+def _standardizer_fingerprint(standardizer: Any) -> str:
+    return hashlib.sha256(standardizer.mean.tobytes() + standardizer.std.tobytes()).hexdigest()
 
 
 class ElapsedFormatter(logging.Formatter):
@@ -121,6 +130,10 @@ def stage_preflight(config: dict[str, Any], raw_root: Path, audit_root: Path, ou
         logger.info("preflight already complete; reusing verified result")
         return
     started = time.perf_counter()
+    if config["training"].get("epoch_selection") != "fixed_registered_epochs":
+        raise RuntimeError("Repaired diagnostic requires fixed registered epoch selection")
+    if config["normalization"].get("oof_standardizer") != "fit_on_outer_train_fold_only":
+        raise RuntimeError("Repaired diagnostic requires fold-local OOF standardization")
     info = runtime_info()
     require_cuda()
     if not info.cuda_available:
@@ -156,6 +169,17 @@ def stage_cache(config: dict[str, Any], raw_root: Path, audit_root: Path, output
         return
     if not complete(output, "preflight"):
         raise RuntimeError("Run preflight before cache")
+    required = [cache / "matlab_log_power.npy", cache / "vsb_event_log_power.npy", cache / "vsb_event_mask.npy", cache / "vsb_event_indices.npy", cache / "vsb_development_metadata.csv", cache / "cache_metadata.json"]
+    if all(path.is_file() for path in required):
+        metadata = json.loads((cache / "cache_metadata.json").read_text(encoding="utf-8"))
+        matlab_shape = tuple(np.load(cache / "matlab_log_power.npy", mmap_mode="r").shape)
+        vsb_shape = tuple(np.load(cache / "vsb_event_log_power.npy", mmap_mode="r").shape)
+        mask_shape = tuple(np.load(cache / "vsb_event_mask.npy", mmap_mode="r").shape)
+        if tuple(metadata.get("matlab_shape", ())) != matlab_shape or tuple(metadata.get("vsb_shape", ())) != vsb_shape or tuple(metadata.get("mask_shape", ())) != mask_shape:
+            raise RuntimeError("Existing raw cache metadata does not match its arrays")
+        finish(output, "cache", {"status": "PASS", "reused": True, "cache_root": str(cache), "matlab_shape": list(matlab_shape), "vsb_shape": list(vsb_shape), "mask_shape": list(mask_shape)})
+        logger.info("cache PASS: reused immutable raw arrays MATLAB=%s VSB=%s", matlab_shape, vsb_shape)
+        return
     started = time.perf_counter()
     matlab, vsb = dataset_handles(raw_root)
     train = load_mat_partition(matlab, "Tr1.mat")
@@ -191,6 +215,8 @@ def stage_cache(config: dict[str, Any], raw_root: Path, audit_root: Path, output
     temporary.replace(destination)
     np.save(cache / "vsb_event_mask.npy", masks)
     np.save(cache / "vsb_event_indices.npy", indices)
+    for name in ("matlab_log_power.npy", "vsb_event_log_power.npy", "vsb_event_mask.npy", "vsb_event_indices.npy"):
+        (cache / f"{name}.complete").write_text("complete\n", encoding="utf-8")
     atomic_json(cache / "cache_metadata.json", {"status": "PASS", "matlab_shape": list(matlab_stft.shape), "vsb_shape": list(shape), "mask_shape": list(masks.shape), "policy": policy.as_dict(), "vsb_spec": vsb_spec.as_dict()})
     finish(output, "cache", {"status": "PASS", "elapsed_seconds": time.perf_counter() - started, "matlab_shape": list(matlab_stft.shape), "vsb_shape": list(shape), "signals": processed})
     logger.info("cache PASS: MATLAB=%s VSB=%s", matlab_stft.shape, shape)
@@ -216,16 +242,42 @@ def _markdown_table(frame: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-def _final_neural_predictions(train_x: np.ndarray, train_y: np.ndarray, validation_x: np.ndarray, validation_y: np.ndarray, *, kind: str, seed: int, epochs: int, batch_size: int = 4) -> np.ndarray:
-    result = train_expert(train_x, train_y, validation_x, validation_y, kind=kind, seed=seed, epochs=epochs, batch_size=batch_size, pos_weight=positive_class_weight(train_y), train_indices=np.arange(len(train_y)), validation_indices=np.arange(len(validation_y)), validation_batch_size=32, num_workers=0, persistent_workers=False, mixed_precision=False)
+def _final_neural_predictions(train_x: Any, train_y: np.ndarray, validation_x: Any, validation_y: np.ndarray, *, kind: str, seed: int, epochs: int, batch_size: int = 4) -> np.ndarray:
+    result = train_expert(
+        train_x, train_y, validation_x, validation_y, kind=kind, seed=seed, epochs=epochs,
+        batch_size=batch_size, pos_weight=positive_class_weight(train_y),
+        train_indices=np.arange(len(train_y)), validation_indices=np.arange(len(validation_y)),
+        validation_batch_size=32, num_workers=0, persistent_workers=False,
+        mixed_precision=False, epoch_selection="fixed",
+    )
     loader = __import__("torch").utils.data.DataLoader(NumpyDataset(validation_x, validation_y), batch_size=32, shuffle=False, num_workers=0, pin_memory=True)
     return _sigmoid(predict_logits(result.model, loader))
 
 
-def _pulse_validation_predictions(values: np.ndarray, mask: np.ndarray, labels: np.ndarray, seed: int, train_indices: np.ndarray, validation_indices: np.ndarray) -> np.ndarray:
-    result = train_pulse_expert(values, mask, labels, representation="spectrogram", seed=seed, epochs=7, train_indices=train_indices, validation_indices=validation_indices, batch_size=8, inference_batch_size=32, pos_weight=positive_class_weight(labels[train_indices]), num_workers=0, persistent_workers=False, mixed_precision=False)
-    loader = pulse_loader(values, mask, labels, validation_indices, batch_size=32, shuffle=False, num_workers=0, persistent_workers=False, prefetch_factor=2)
-    return _sigmoid(predict_pulse_logits(result.model, loader))
+def _pulse_validation_predictions(
+    values: Any,
+    mask: np.ndarray,
+    labels: np.ndarray,
+    seed: int,
+    train_indices: np.ndarray,
+    validation_indices: np.ndarray,
+    *,
+    epochs: int,
+) -> tuple[np.ndarray, dict[str, np.ndarray], Any]:
+    standardizer = fit_spectrogram_standardizer(values, train_indices, valid_mask=mask)
+    standardized = standardizer.view(values, valid_mask=mask)
+    result = train_pulse_expert(
+        standardized, mask, labels, representation="spectrogram", seed=seed, epochs=epochs,
+        train_indices=train_indices, validation_indices=np.empty(0, dtype=np.int64), batch_size=8,
+        inference_batch_size=32, pos_weight=positive_class_weight(labels[train_indices]),
+        num_workers=0, persistent_workers=False, mixed_precision=False, epoch_selection="fixed",
+    )
+    loader = pulse_loader(
+        standardized, mask, labels, validation_indices, batch_size=32, shuffle=False,
+        num_workers=0, persistent_workers=False, prefetch_factor=2,
+    )
+    outputs = predict_pulse_outputs(result.model, loader, mixed_precision=False)
+    return np.asarray(outputs["signal_probability"], dtype=np.float64), outputs, standardizer
 
 
 def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, output: Path, cache: Path, logger: logging.Logger) -> None:
@@ -239,22 +291,56 @@ def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, outp
     train_mat = load_mat_partition(matlab, "Tr1.mat")
     val_mat = load_mat_partition(matlab, "Va1.mat")
     mat_folds = fold_assignments(train_mat.label, n_splits=5, seed=42)
-    raw_standardizer = fit_standardizer(train_mat.signal, axis=0)
-    mat_temporal_train = temporal_input(train_mat.signal, raw_standardizer)
-    mat_temporal_val = temporal_input(val_mat.signal, raw_standardizer)
-    mat_raw_stft = np.load(cache / "matlab_log_power.npy", mmap_mode="r").astype(np.float32)
-    mat_raw_train, mat_raw_val = mat_raw_stft[:len(train_mat.signal)], mat_raw_stft[len(train_mat.signal):]
-    mat_std = fit_spectrogram_standardizer(mat_raw_stft, np.arange(len(train_mat.signal)))
-    mat_spec_train, mat_spec_val = mat_std.transform(mat_raw_train), mat_std.transform(mat_raw_val)
+    temporal_epochs = int(config["training"].get("matlab_temporal_epochs", 5))
+    matlab_spec_epochs = int(config["training"]["matlab_spectrogram"].get("epochs", 5))
+    vsb_spec_epochs = int(config["training"]["vsb_spectrogram"].get("epochs", 7))
+    mat_raw_stft = np.load(cache / "matlab_log_power.npy", mmap_mode="r")
+    mat_raw_train = mat_raw_stft[:len(train_mat.signal)]
+    mat_raw_val = mat_raw_stft[len(train_mat.signal):]
+    standardizer_records: list[dict[str, Any]] = []
+    current_seed: int | None = None
+
+    def mat_temporal_fold(raw: Any, fit: np.ndarray, holdout: np.ndarray, fold: int) -> np.ndarray:
+        standardizer = fit_standardizer(np.asarray(raw)[fit], axis=0)
+        standardizer_records.append({"dataset": "matlab", "representation": "temporal", "scope": "oof_outer_train", "seed": current_seed, "fold": fold, "fit_count": int(len(fit)), "fingerprint": _standardizer_fingerprint(standardizer)})
+        return temporal_input(np.asarray(raw), standardizer)
+
+    def mat_spectrogram_fold(raw: Any, fit: np.ndarray, holdout: np.ndarray, fold: int) -> Any:
+        standardizer = fit_spectrogram_standardizer(raw, fit)
+        standardizer_records.append({"dataset": "matlab", "representation": "spectrogram", "scope": "oof_outer_train", "seed": current_seed, "fold": fold, "fit_count": standardizer.fit_count, "fingerprint": standardizer.fingerprint})
+        return standardizer.view(raw)
+
+    final_temporal_standardizer = fit_standardizer(train_mat.signal, axis=0)
+    mat_temporal_train = temporal_input(train_mat.signal, final_temporal_standardizer)
+    mat_temporal_val = temporal_input(val_mat.signal, final_temporal_standardizer)
+    final_matlab_spec_standardizer = fit_spectrogram_standardizer(mat_raw_stft, np.arange(len(train_mat.signal)))
+    mat_spec_train = final_matlab_spec_standardizer.transform(mat_raw_train)
+    mat_spec_val = final_matlab_spec_standardizer.transform(mat_raw_val)
+    standardizer_records.extend([
+        {"dataset": "matlab", "representation": "temporal", "scope": "final_train", "seed": None, "fit_count": int(len(train_mat.signal)), "fingerprint": _standardizer_fingerprint(final_temporal_standardizer)},
+        {"dataset": "matlab", "representation": "spectrogram", "scope": "final_train", "seed": None, "fit_count": final_matlab_spec_standardizer.fit_count, "fingerprint": final_matlab_spec_standardizer.fingerprint},
+    ])
     rows: list[pd.DataFrame] = []
+    aggregation_rows: list[pd.DataFrame] = []
     for seed in config["scope"]["seeds"]:
+        current_seed = int(seed)
         logger.info("MATLAB seed %d temporal OOF", seed)
-        temporal_oof = cross_fitted_logits(mat_temporal_train, train_mat.label, kind="temporal", folds=mat_folds, seed=int(seed), epochs=5, batch_size=4, validation_batch_size=32, num_workers=0, persistent_workers=False, mixed_precision=False).logits
-        spec_oof = cross_fitted_logits(mat_spec_train, train_mat.label, kind="spectrogram", folds=mat_folds, seed=int(seed), epochs=5, batch_size=4, validation_batch_size=32, num_workers=0, persistent_workers=False, mixed_precision=False).logits
+        temporal_oof = cross_fitted_logits(
+            train_mat.signal, train_mat.label, kind="temporal", folds=mat_folds, seed=int(seed),
+            epochs=temporal_epochs, batch_size=4, validation_batch_size=32, num_workers=0,
+            persistent_workers=False, mixed_precision=False, fold_transform=mat_temporal_fold,
+            epoch_selection="fixed",
+        ).logits
+        spec_oof = cross_fitted_logits(
+            mat_raw_train, train_mat.label, kind="spectrogram", folds=mat_folds, seed=int(seed),
+            epochs=matlab_spec_epochs, batch_size=4, validation_batch_size=32, num_workers=0,
+            persistent_workers=False, mixed_precision=False, fold_transform=mat_spectrogram_fold,
+            epoch_selection="fixed",
+        ).logits
         temporal_threshold = select_threshold(train_mat.label, _sigmoid(temporal_oof))
         spec_threshold = select_threshold(train_mat.label, _sigmoid(spec_oof))
-        temporal_val = _final_neural_predictions(mat_temporal_train, train_mat.label, mat_temporal_val, val_mat.label, kind="temporal", seed=int(seed), epochs=5)
-        spec_val = _final_neural_predictions(mat_spec_train, train_mat.label, mat_spec_val, val_mat.label, kind="spectrogram", seed=int(seed), epochs=5)
+        temporal_val = _final_neural_predictions(mat_temporal_train, train_mat.label, mat_temporal_val, val_mat.label, kind="temporal", seed=int(seed), epochs=temporal_epochs)
+        spec_val = _final_neural_predictions(mat_spec_train, train_mat.label, mat_spec_val, val_mat.label, kind="spectrogram", seed=int(seed), epochs=matlab_spec_epochs)
         rows.extend([
             pd.DataFrame({"dataset": "matlab", "split": "train_oof", "sample_id": train_mat.sample_id, "id_measurement": train_mat.sample_id, "phase": "NA", "target": train_mat.label, "method": "temporal", "seed": seed, "probability": _sigmoid(temporal_oof), "prediction": (_sigmoid(temporal_oof) >= temporal_threshold).astype(int), "threshold": temporal_threshold}),
             pd.DataFrame({"dataset": "matlab", "split": "validation", "sample_id": val_mat.sample_id, "id_measurement": val_mat.sample_id, "phase": "NA", "target": val_mat.label, "method": "temporal", "seed": seed, "probability": temporal_val, "prediction": (temporal_val >= temporal_threshold).astype(int), "threshold": temporal_threshold}),
@@ -283,26 +369,60 @@ def stage_experts(config: dict[str, Any], raw_root: Path, audit_root: Path, outp
     groups = metadata["id_measurement"].astype(str).to_numpy()
     labels = metadata["target"].to_numpy(np.int64)
     folds = metadata["oof_fold"].to_numpy(np.int64)
+    vsb_train_values = IndexedArrayView(vsb_values, train_index)
+    vsb_train_mask = IndexedArrayView(vsb_mask, train_index)
+    cached_indices = np.asarray(np.load(cache / "vsb_event_indices.npy", mmap_mode="r"))
+    localization = metadata[["sample_id", "id_measurement", "phase", "target", "split"]].copy()
+    localization["valid_event_count_half_0"] = np.asarray(vsb_mask[:, 0].sum(axis=1), dtype=np.int64)
+    localization["valid_event_count_half_1"] = np.asarray(vsb_mask[:, 1].sum(axis=1), dtype=np.int64)
+    localization["event_index_min"] = np.where(vsb_mask, cached_indices, np.iinfo(np.int64).max).min(axis=(1, 2))
+    localization["event_index_max"] = np.where(vsb_mask, cached_indices, -1).max(axis=(1, 2))
+    localization["boundary_rejections"] = np.nan
+    localization.to_csv(output / "vsb_event_localization.csv", index=False)
+
+    def vsb_spectrogram_fold(raw: Any, fit: np.ndarray, holdout: np.ndarray, fold: int) -> tuple[Any, Any]:
+        standardizer = fit_spectrogram_standardizer(raw, fit, valid_mask=vsb_train_mask)
+        standardizer_records.append({"dataset": "vsb", "representation": "spectrogram", "scope": "oof_outer_train", "seed": current_seed, "fold": fold, "fit_count": standardizer.fit_count, "fingerprint": standardizer.fingerprint})
+        return standardizer.view(raw, valid_mask=vsb_train_mask), vsb_train_mask
+
     for seed in config["scope"]["seeds"]:
+        current_seed = int(seed)
         logger.info("VSB seed %d spectrogram OOF", seed)
-        train_values = np.asarray(vsb_values[train_index])
-        train_mask = np.asarray(vsb_mask[train_index])
         train_labels = labels[train_index]
         train_groups = groups[train_index]
         train_folds = folds[train_index]
-        oof = cross_fitted_pulse_logits(train_values, train_mask, train_labels, representation="spectrogram", folds=train_folds, seed=int(seed), groups=train_groups, epochs=7, batch_size=8, inference_batch_size=32, num_workers=0, persistent_workers=False, mixed_precision=False).logits
+        oof_result = cross_fitted_pulse_logits(
+            vsb_train_values, vsb_train_mask, train_labels, representation="spectrogram",
+            folds=train_folds, seed=int(seed), groups=train_groups, epochs=vsb_spec_epochs,
+            batch_size=8, inference_batch_size=32, num_workers=0, persistent_workers=False,
+            mixed_precision=False, fold_transform=vsb_spectrogram_fold, epoch_selection="fixed",
+        )
+        oof = oof_result.logits
         probability_oof = _sigmoid(oof)
         threshold = select_threshold(train_labels, probability_oof)
-        validation_probability = _pulse_validation_predictions(vsb_values, vsb_mask, labels, int(seed), train_index, val_index)
+        validation_probability, validation_aggregation, final_vsb_standardizer = _pulse_validation_predictions(
+            vsb_values, vsb_mask, labels, int(seed), train_index, val_index, epochs=vsb_spec_epochs,
+        )
+        standardizer_records.append({"dataset": "vsb", "representation": "spectrogram", "scope": "final_train", "seed": int(seed), "fit_count": final_vsb_standardizer.fit_count, "fingerprint": final_vsb_standardizer.fingerprint})
         current_oof = metadata.iloc[train_index][["sample_id", "id_measurement", "phase", "target"]].copy()
         current_oof["probability"] = probability_oof; current_oof["prediction"] = (current_oof["probability"] >= threshold).astype(int); current_oof["dataset"] = "vsb"; current_oof["split"] = "train_oof"; current_oof["method"] = "spectrogram"; current_oof["seed"] = seed; current_oof["threshold"] = threshold
         current_val = metadata.iloc[val_index][["sample_id", "id_measurement", "phase", "target"]].copy()
         current_val["probability"] = validation_probability; current_val["prediction"] = (validation_probability >= threshold).astype(int); current_val["dataset"] = "vsb"; current_val["split"] = "validation"; current_val["method"] = "spectrogram"; current_val["seed"] = seed; current_val["threshold"] = threshold
         rows.extend([current_oof, current_val])
+        if oof_result.aggregation_summaries:
+            oof_aggregation = pd.DataFrame({"sample_id": metadata.iloc[train_index]["sample_id"].to_numpy(), **{name: values for name, values in oof_result.aggregation_summaries.items()}})
+            oof_aggregation["dataset"], oof_aggregation["split"], oof_aggregation["seed"] = "vsb", "train_oof", seed
+            aggregation_rows.append(oof_aggregation)
+        val_aggregation = pd.DataFrame({"sample_id": metadata.iloc[val_index]["sample_id"].to_numpy(), **validation_aggregation})
+        val_aggregation["dataset"], val_aggregation["split"], val_aggregation["seed"] = "vsb", "validation", seed
+        aggregation_rows.append(val_aggregation)
         logger.info("VSB seed %d spectrogram ready", seed)
     rows.extend(temporal_rows)
     predictions = pd.concat(rows, ignore_index=True)
     predictions.to_parquet(output / "validation_predictions.parquet", index=False)
+    pd.DataFrame(standardizer_records).to_json(output / "standardizer_fingerprints.json", orient="records", indent=2)
+    if aggregation_rows:
+        pd.concat(aggregation_rows, ignore_index=True).to_parquet(output / "vsb_aggregation_diagnostics.parquet", index=False)
     finish(output, "experts", {"status": "PASS", "elapsed_seconds": time.perf_counter() - started, "prediction_rows": len(predictions), "datasets": ["matlab", "vsb"], "seeds": config["scope"]["seeds"]})
 
 
@@ -334,21 +454,104 @@ def stage_evaluation(config: dict[str, Any], output: Path, logger: logging.Logge
         raise RuntimeError("Validation predictions must be binary after thresholding")
     metric_rows: list[dict[str, Any]] = []
     overlap_rows: list[dict[str, Any]] = []
-    for (dataset, seed), group in predictions[predictions["split"] == "validation"].groupby(["dataset", "seed"], sort=True):
-        for method, current in group.groupby("method", sort=True):
-            metric_rows.append({"dataset": dataset, "seed": int(seed), "method": method, **binary_metrics(current["target"].to_numpy(), current["probability"].to_numpy(), float(current["threshold"].iloc[0]))})
-        temporal = group[group["method"] == "temporal"].sort_values("sample_id")
-        spectrogram = group[group["method"] == "spectrogram"].sort_values("sample_id")
-        if len(temporal) == len(spectrogram) and temporal["sample_id"].tolist() == spectrogram["sample_id"].tolist():
-            oracle = prediction_overlap_oracle(temporal["target"].to_numpy(), temporal["prediction"].to_numpy(), spectrogram["prediction"].to_numpy(), temporal["id_measurement"].to_numpy())
-            overlap_rows.append({"dataset": dataset, "seed": int(seed), **{key: value for key, value in oracle.items() if key != "rows"}})
-            for row in oracle["rows"]:
-                overlap_rows.append({"dataset": dataset, "seed": int(seed), **row})
-    metrics = pd.DataFrame(metric_rows); overlaps = pd.DataFrame(overlap_rows)
-    metrics.to_csv(output / "metrics.csv", index=False); overlaps.to_csv(output / "prediction_overlap.csv", index=False)
-    atomic_json(output / "evaluation_summary.json", {"status": "PASS", "metrics": metric_rows, "overlap": overlap_rows})
-    finish(output, "evaluation", {"status": "PASS", "elapsed_seconds": time.perf_counter() - started, "metric_rows": len(metrics), "overlap_rows": len(overlaps)})
-    logger.info("evaluation PASS: metrics=%d overlap=%d", len(metrics), len(overlaps))
+    curve_rows: list[dict[str, Any]] = []
+    probability_rows: list[dict[str, Any]] = []
+    fixed_metric_rows: list[dict[str, Any]] = []
+    fixed_prediction_rows: list[pd.DataFrame] = []
+    bootstrap_rows: list[dict[str, Any]] = []
+    hierarchical_records: dict[tuple[str, str], list[dict[str, np.ndarray]]] = {}
+    weights = tuple(float(value) for value in config["diagnostics"]["fixed_weights"])
+    for (dataset, seed), group in predictions.groupby(["dataset", "seed"], sort=True):
+        seed = int(seed)
+        validation = group[group["split"] == "validation"]
+        oof = group[group["split"] == "train_oof"]
+        for split_name, current in (("validation", validation), ("train_oof", oof)):
+            for method, method_rows in current.groupby("method", sort=True):
+                probability = method_rows["probability"].to_numpy(dtype=float)
+                threshold = float(method_rows["threshold"].iloc[0])
+                summary = probability_summary(probability)
+                probability_rows.append({"dataset": dataset, "seed": seed, "method": method, "split": split_name, **summary})
+                curve_rows.extend({"dataset": dataset, "seed": seed, "method": method, "split": split_name, **row} for row in threshold_curve(method_rows["target"].to_numpy(), probability))
+        temporal = validation[validation["method"] == "temporal"].sort_values("sample_id")
+        spectrogram = validation[validation["method"] == "spectrogram"].sort_values("sample_id")
+        temporal_oof = oof[oof["method"] == "temporal"].sort_values("sample_id")
+        spectrogram_oof = oof[oof["method"] == "spectrogram"].sort_values("sample_id")
+        if len(temporal) == 0 or temporal["sample_id"].tolist() != spectrogram["sample_id"].tolist() or temporal_oof["sample_id"].tolist() != spectrogram_oof["sample_id"].tolist():
+            raise RuntimeError(f"Prediction alignment failed for {dataset} seed {seed}")
+        for method, current in (("temporal", temporal), ("spectrogram", spectrogram)):
+            metric_rows.append({"dataset": dataset, "seed": seed, "method": method, "split": "validation", **binary_metrics(current["target"].to_numpy(), current["probability"].to_numpy(), float(current["threshold"].iloc[0]))})
+        oracle = prediction_overlap_oracle(temporal["target"].to_numpy(), temporal["prediction"].to_numpy(), spectrogram["prediction"].to_numpy(), temporal["id_measurement"].to_numpy())
+        overlap_rows.append({"dataset": dataset, "seed": seed, **{key: value for key, value in oracle.items() if key != "rows"}})
+        for row in oracle["rows"]:
+            overlap_rows.append({"dataset": dataset, "seed": seed, **row})
+        mixture_rows, best_fixed = select_fixed_weight_oof(
+            temporal["target"].to_numpy(), temporal["probability"].to_numpy(), spectrogram["probability"].to_numpy(),
+            temporal_oof["target"].to_numpy(), temporal_oof["probability"].to_numpy(), spectrogram_oof["probability"].to_numpy(), weights,
+        )
+        mixture_frame = pd.DataFrame(mixture_rows)
+        mixture_frame["dataset"], mixture_frame["seed"] = dataset, seed
+        mixture_frame.to_csv(output / f"fixed_mixture_{dataset}_{seed}.csv", index=False)
+        for label, selected in (("50_50", next(row for row in mixture_rows if abs(row["temporal_weight"] - 0.5) < 1e-12)), ("best_fixed", best_fixed)):
+            probability = selected["temporal_weight"] * temporal["probability"].to_numpy() + (1.0 - selected["temporal_weight"]) * spectrogram["probability"].to_numpy()
+            hard = (probability >= selected["threshold"]).astype(np.int64)
+            metrics = binary_metrics(temporal["target"].to_numpy(), probability, selected["threshold"])
+            fixed_metric_rows.append({"dataset": dataset, "seed": seed, "method": label, "split": "validation", "temporal_weight": selected["temporal_weight"], **metrics})
+            fixed_prediction_rows.append(pd.DataFrame({"dataset": dataset, "seed": seed, "method": label, "split": "validation", "sample_id": temporal["sample_id"].to_numpy(), "id_measurement": temporal["id_measurement"].to_numpy(), "phase": temporal["phase"].to_numpy(), "target": temporal["target"].to_numpy(), "probability": probability, "prediction": hard, "threshold": selected["threshold"]}))
+        oof_mcc = {method: float(binary_metrics(current["target"].to_numpy(), current["probability"].to_numpy(), float(current["threshold"].iloc[0]))["mcc"]) for method, current in (("temporal", temporal_oof), ("spectrogram", spectrogram_oof))}
+        best_individual = "temporal" if (oof_mcc["temporal"], 1) >= (oof_mcc["spectrogram"], 0) else "spectrogram"
+        best_individual_prediction = temporal["prediction"].to_numpy() if best_individual == "temporal" else spectrogram["prediction"].to_numpy()
+        fixed_by_method = {frame["method"].iloc[0]: frame for frame in fixed_prediction_rows if frame["dataset"].iloc[0] == dataset and int(frame["seed"].iloc[0]) == seed}
+        comparisons = {
+            "spectrogram_minus_temporal": (spectrogram["prediction"].to_numpy(), temporal["prediction"].to_numpy()),
+            "50_50_minus_best_individual": (fixed_by_method["50_50"]["prediction"].to_numpy(), best_individual_prediction),
+            "best_fixed_minus_best_individual": (fixed_by_method["best_fixed"]["prediction"].to_numpy(), best_individual_prediction),
+        }
+        for comparison, (prediction_a, prediction_b) in comparisons.items():
+            unit = temporal["id_measurement"].to_numpy() if dataset == "vsb" else temporal["sample_id"].to_numpy()
+            result = grouped_paired_bootstrap_delta(temporal["target"].to_numpy(), prediction_a, prediction_b, unit, iterations=int(config["statistics"]["paired_bootstrap_iterations"]), seed=42042 + seed) if dataset == "vsb" else paired_bootstrap_delta(temporal["target"].to_numpy(), prediction_a, prediction_b, iterations=int(config["statistics"]["paired_bootstrap_iterations"]), seed=42042 + seed)
+            bootstrap_rows.append({"dataset": dataset, "seed": seed, "comparison": comparison, "bootstrap_unit": "id_measurement" if dataset == "vsb" else "signal", **result})
+            hierarchical_records.setdefault((dataset, comparison), []).append({"labels": temporal["target"].to_numpy(), "prediction_a": prediction_a, "prediction_b": prediction_b, "group_ids": unit})
+    metrics = pd.concat([pd.DataFrame(metric_rows), pd.DataFrame(fixed_metric_rows)], ignore_index=True)
+    overlaps = pd.DataFrame(overlap_rows)
+    pd.DataFrame(curve_rows).to_csv(output / "threshold_curves.csv", index=False)
+    pd.DataFrame(probability_rows).to_csv(output / "probability_diagnostics.csv", index=False)
+    metrics.to_csv(output / "metrics.csv", index=False)
+    overlaps.to_csv(output / "prediction_overlap.csv", index=False)
+    pd.DataFrame(bootstrap_rows).to_csv(output / "bootstrap_deltas.csv", index=False)
+    pd.DataFrame(bootstrap_rows).to_json(output / "bootstrap_deltas.json", orient="records", indent=2)
+    pd.concat(fixed_prediction_rows, ignore_index=True).to_parquet(output / "fixed_mixture_predictions.parquet", index=False)
+    hierarchical_rows = []
+    for (dataset, comparison), records in hierarchical_records.items():
+        if dataset == "vsb":
+            result = hierarchical_grouped_delta_ci(records, comparison, iterations=int(config["statistics"]["paired_bootstrap_iterations"]), seed=int(config["statistics"].get("bootstrap_seed", 42042)))
+        else:
+            result = hierarchical_paired_delta_ci(records, comparison, iterations=int(config["statistics"]["paired_bootstrap_iterations"]), seed=int(config["statistics"].get("bootstrap_seed", 42042)))
+        hierarchical_rows.append({"dataset": dataset, **result})
+    atomic_json(output / "hierarchical_bootstrap.json", hierarchical_rows)
+    pd.DataFrame(hierarchical_rows).to_csv(output / "hierarchical_bootstrap.csv", index=False)
+    regression_rows: list[dict[str, Any]] = []
+    for dataset, key in (("vsb", "vsb_temporal"), ("matlab", "matlab_temporal")):
+        expected = config["regression"][key]["expected"]
+        tolerance_mcc = float(config["regression"][key]["tolerance_mcc"])
+        tolerance_threshold = float(config["regression"][key]["tolerance_threshold"])
+        observed = metrics[(metrics["dataset"] == dataset) & (metrics["method"] == "temporal")].sort_values("seed")
+        for seed, expected_value in expected.items():
+            seed = int(seed)
+            row = observed[observed["seed"] == seed]
+            observed_mcc = float(row["mcc"].iloc[0]) if len(row) else float("nan")
+            if isinstance(expected_value, dict):
+                target_mcc, target_threshold = float(expected_value["mcc"]), float(expected_value["threshold"])
+            else:
+                target_mcc, target_threshold = float(expected_value), None
+            observed_threshold = float(row["threshold"].iloc[0]) if len(row) else float("nan")
+            status = abs(observed_mcc - target_mcc) <= tolerance_mcc and (target_threshold is None or abs(observed_threshold - target_threshold) <= tolerance_threshold)
+            regression_rows.append({"dataset": dataset, "seed": seed, "observed_mcc": observed_mcc, "expected_mcc": target_mcc, "observed_threshold": observed_threshold, "expected_threshold": target_threshold, "tolerance_mcc": tolerance_mcc, "tolerance_threshold": tolerance_threshold, "status": "PASS" if status else "FAIL"})
+    regression_ok = all(row["status"] == "PASS" for row in regression_rows)
+    atomic_json(output / "regression_checks.json", {"status": "PASS" if regression_ok else "FAIL", "checks": regression_rows})
+    summary_payload = {"status": "PASS", "regression_ok": regression_ok, "metrics": metrics.to_dict(orient="records"), "overlap": overlap_rows, "bootstrap": bootstrap_rows, "hierarchical_bootstrap": hierarchical_rows, "regression": regression_rows}
+    atomic_json(output / "evaluation_summary.json", summary_payload)
+    finish(output, "evaluation", {"status": "PASS", "regression_ok": regression_ok, "elapsed_seconds": time.perf_counter() - started, "metric_rows": len(metrics), "overlap_rows": len(overlaps)})
+    logger.info("evaluation PASS: metrics=%d overlap=%d regression=%s", len(metrics), len(overlaps), regression_ok)
 
 
 def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -> None:
@@ -359,19 +562,58 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
         raise RuntimeError("Run evaluation before report")
     metrics = pd.read_csv(output / "metrics.csv")
     overlaps = pd.read_csv(output / "prediction_overlap.csv")
-    summary = {"integrity_ok": True, "regression_ok": True, "spectrogram_evidence": bool(len(metrics)), "vsb_spectrogram_strong": False, "matlab_spectrogram_strong": False, "complementarity_supported": False}
+    preflight = json.loads((output / "preflight.json").read_text(encoding="utf-8"))
+    regression = json.loads((output / "regression_checks.json").read_text(encoding="utf-8"))
+    hierarchical = json.loads((output / "hierarchical_bootstrap.json").read_text(encoding="utf-8"))
+    summary = {
+        "pipeline_valid": preflight.get("status") == "PASS" and regression.get("status") == "PASS",
+        "integrity_ok": preflight.get("status") == "PASS",
+        "regression_ok": regression.get("status") == "PASS",
+        "spectrogram_evidence": bool(len(metrics)),
+        "vsb_spectrogram_strong": False,
+        "matlab_spectrogram_strong": False,
+        "complementarity_supported": False,
+    }
     for dataset in ("matlab", "vsb"):
         values = metrics[(metrics.dataset == dataset) & (metrics.method == "spectrogram")]["mcc"]
         if len(values) == 3:
             if dataset == "vsb": summary["vsb_spectrogram_strong"] = float(values.mean()) >= 0.60 and float(values.min()) > 0.55
             else: summary["matlab_spectrogram_strong"] = float(values.mean()) >= 0.95 and float(values.min()) >= 0.93
+    if "oracle_headroom" in overlaps:
+        top_level = overlaps[overlaps.get("stratum", pd.Series(index=overlaps.index, dtype=object)).isna()]
+        headroom = top_level["oracle_headroom"].to_numpy(dtype=float)
+        ci_rows = [row for row in hierarchical if row.get("comparison") == "spectrogram_minus_temporal"]
+        summary["complementarity_supported"] = bool(
+            len(headroom) == 6 and float(headroom.mean()) >= float(config["verdict"]["meaningful_oracle_headroom"])
+            and int(np.sum(headroom >= float(config["verdict"]["minimum_headroom_per_seed"]))) >= int(config["verdict"]["minimum_headroom_seeds"])
+            and all(row.get("ci_95", [float("nan")])[0] > float(config["verdict"]["aggregate_ci_lower_bound"]) for row in ci_rows)
+        )
     summary["verdict"] = classify_cross_dataset_verdict(summary)
-    report = ["# Cross-Dataset Temporal vs Spectrogram Diagnostic", "", f"**Verdict:** `{summary['verdict']}`", "", "## OBSERVED", "", "This development-only report uses MATLAB Tr1/Va1 and VSB grouped development identities. VSB grouped test, official test, MATLAB Te1/Te2, CWT reruns, and adaptive fusion were not opened.", "", "### Validation metrics", "", _markdown_table(metrics), "", "### Prediction overlap", "", _markdown_table(overlaps), "", "## INTERPRETATION", "", "The verdict is registered only after integrity, split, cache, alignment, and temporal regression checks. Fixed mixtures are diagnostic-only.", "", "## UNRESOLVED", "", "Dual-CyCon frequency concepts are verified only at high level. Erişti and exact reported literature values remain PROJECT LITERATURE ANCHOR — NOT REVERIFIED."]
+    report = [
+        "# Cross-Dataset Temporal vs Spectrogram Diagnostic (Repaired Run)", "",
+        f"**Pipeline valid:** `{summary['pipeline_valid']}`  ", f"**Scientific verdict:** `{summary['verdict']}`", "",
+        "This repaired run is separate from the prior provisional report. Raw caches are reused without modification; repaired predictions and reports use a new versioned output root.", "",
+        "## OBSERVED", "",
+        "This development-only report uses MATLAB Tr1/Va1 and VSB grouped development identities. VSB grouped test, official test, MATLAB Te1/Te2, CWT reruns, adaptive fusion, reliability models, and external weights remain locked.", "",
+        "### Temporal regression gates", "", _markdown_table(pd.DataFrame(regression.get("checks", []))), "",
+        "### Validation metrics", "", _markdown_table(metrics), "",
+        "### Prediction overlap and oracle", "", _markdown_table(overlaps), "",
+        "### Hierarchical paired bootstrap", "", _markdown_table(pd.DataFrame(hierarchical)), "",
+        "### Additional diagnostics", "",
+        "- `threshold_curves.csv`: registered threshold grid for OOF and validation; selection is OOF-only.",
+        "- `probability_diagnostics.csv`: probability ranges and quantiles.",
+        "- `fixed_mixture_predictions.parquet`: diagnostic-only 50/50 and OOF-selected best-fixed mixtures.",
+        "- `vsb_aggregation_diagnostics.parquet`: event counts, top-k counts, event probabilities, half-cycle probabilities, and parent probabilities.", "",
+        "## INTERPRETATION", "",
+        "Pipeline validity and scientific verdict are reported separately. A failed temporal regression gate forces `INCONCLUSIVE`. Fixed mixtures are diagnostic-only and do not create an adaptive-fusion pipeline.", "",
+        "## UNRESOLVED", "",
+        "Dual-CyCon frequency concepts are verified only at high level. Erişti and exact reported literature values remain PROJECT LITERATURE ANCHOR — NOT REVERIFIED. Localization summaries are limited to information present in the immutable event cache.",
+    ]
     report_path = ROOT / config["outputs"]["report"]
     report_path.parent.mkdir(parents=True, exist_ok=True); report_path.write_text("\n".join(report) + "\n", encoding="utf-8")
-    atomic_json(ROOT / config["outputs"]["summary"], {"diagnostic": "Cross-Dataset Temporal vs Spectrogram", **summary, "metrics": metrics.to_dict(orient="records"), "overlap": overlaps.to_dict(orient="records")})
+    atomic_json(ROOT / config["outputs"]["summary"], {"diagnostic": "Cross-Dataset Temporal vs Spectrogram", **summary, "regression": regression, "metrics": metrics.to_dict(orient="records"), "overlap": overlaps.to_dict(orient="records"), "hierarchical_bootstrap": hierarchical})
     manifest = ROOT / config["outputs"]["manifest"]
-    manifest.parent.mkdir(parents=True, exist_ok=True); manifest.write_text(f"# Diagnostic Manifest\n\n- Status: {summary['verdict']}\n- Generated rows: {len(metrics)} metrics, {len(overlaps)} overlap\n- Holdouts: locked\n- Data contract: `PD_RAW_DATA_ROOT/data/raw`\n", encoding="utf-8")
+    manifest.parent.mkdir(parents=True, exist_ok=True); manifest.write_text(f"# Diagnostic Manifest\n\n- Pipeline valid: `{summary['pipeline_valid']}`\n- Scientific verdict: `{summary['verdict']}`\n- Generated rows: {len(metrics)} metrics, {len(overlaps)} overlap\n- Temporal regression: `{regression.get('status')}`\n- Holdouts: locked\n- Data contract: `PD_RAW_DATA_ROOT/data/raw`\n- Raw cache: reused and unnormalized\n", encoding="utf-8")
     finish(output, "report", {"status": "PASS", "verdict": summary["verdict"], "metrics": len(metrics), "overlap": len(overlaps)})
     logger.info("report PASS: verdict=%s", summary["verdict"])
 
@@ -381,14 +623,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--raw-root", type=Path, default=None)
     parser.add_argument("--audit-root", type=Path, default=Path("results/audits/vsb-literature-forensic"))
-    parser.add_argument("--output-root", type=Path, default=Path("results/audits/temporal-spectrogram-cross-dataset"))
-    parser.add_argument("--cache-root", type=Path, default=Path("results/cache/temporal-spectrogram-cross-dataset"))
+    parser.add_argument("--output-root", type=Path, default=None)
+    parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--stage", choices=("preflight", "cache", "experts", "evaluation", "report", "all"), default="preflight")
     parser.add_argument("--log-file", type=Path, default=None)
     args = parser.parse_args(argv)
     config = load_config(args.config.resolve())
     raw_root = raw_data_root(args.raw_root)
-    output = args.output_root.resolve(); audit_root = args.audit_root.resolve(); cache = args.cache_root.resolve()
+    output = (args.output_root or ROOT / config["outputs"]["audit_root"]).resolve()
+    audit_root = args.audit_root.resolve()
+    cache = (args.cache_root or ROOT / config["outputs"]["cache_root"]).resolve()
     output.mkdir(parents=True, exist_ok=True); cache.mkdir(parents=True, exist_ok=True)
     logger = make_logger(args.log_file)
     stages = [args.stage] if args.stage != "all" else ["preflight", "cache", "experts", "evaluation", "report"]
