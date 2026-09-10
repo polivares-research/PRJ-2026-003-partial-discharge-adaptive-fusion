@@ -30,9 +30,26 @@ Then execute the development stages in order:
 
 `--stage all` is equivalent to these development stages. It does not open any
 holdout. If a dataset fails its gate, the freeze stage stops and no
-confirmatory command is valid. A confirmatory command must use the generated
-`frozen_config.yaml`, must select only the eligible dataset, and must write
-under the versioned output namespace; the runner refuses a non-frozen config.
+confirmatory command is valid. After freeze, create a fresh expert handoff
+with five-seed `train_oof` rows and the holdout rows only for the eligible
+dataset. It must contain one temporal and one global-spectrogram row per
+signal. Then evaluate the handoff explicitly:
+
+```bash
+/opt/micromamba/bin/micromamba run -n partial-discharge python scripts/run_current_expert_adaptive_fusion.py \
+  --config results/audits/current-expert-adaptive-fusion/frozen_config.yaml \
+  --raw-root "$PD_RAW_DATA_ROOT" \
+  --confirmatory-source results/audits/current-expert-adaptive-fusion/confirmatory_expert_handoff.parquet \
+  --stage confirmatory \
+  --log-file logs/current_expert_adaptive_fusion_confirmatory.log
+```
+
+The runner validates the handoff, fits the registered fusion components from
+all-development OOF rows for each seed, and scores the eligible holdout.
+Expert generation itself must be completed by the frozen post-freeze expert
+runner; the development `all` command never opens a holdout. The
+confirmatory stage rejects a non-frozen config, missing seeds, unpaired IDs,
+and holdouts from an ineligible dataset.
 
 Before any full run, the unit tests can be run without raw-data access:
 
@@ -46,4 +63,3 @@ Resume is safe because each completed stage has a JSON payload and a
 `.complete` marker. Do not delete or edit those markers manually; an
 incompatible source or configuration must be written to a new output
 namespace.
-
