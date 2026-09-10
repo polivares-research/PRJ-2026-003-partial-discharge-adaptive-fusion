@@ -430,6 +430,7 @@ def stage_matlab_reference(
     if not (base_output / "experts.complete").is_file() or not base_predictions_path.is_file():
         raise RuntimeError("The base full-signal experts output is required before MATLAB reference regeneration")
     started = time.perf_counter()
+    output.mkdir(parents=True, exist_ok=True)
     matlab, _ = _datasets(raw_root)
     train_mat, val_mat = load_mat_partition(matlab, "Tr1.mat"), load_mat_partition(matlab, "Va1.mat")
     reference = config["historical_matlab_reference"]
