@@ -98,6 +98,7 @@ protection:
   te1_usage: forbidden
 sources:
   development_predictions: results/audits/full-signal-spectrogram-cross-dataset/validation_predictions.parquet
+  development_predictions_sha256: 763236c7fb1d1ce90a068b2d8450564a3dd300914a8863c59c62fe24c79aa51f
   historical_matlab_reference: results/audits/full-signal-spectrogram-cross-dataset-matlab-reference/validation_predictions.parquet
   historical_metrics_context_only:
     - reports/metrics/v3-windowed/matlab_per_seed.csv

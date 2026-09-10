@@ -135,8 +135,12 @@ def source_path(config: dict[str, Any], override: Path | None) -> Path:
 
 def stage_preflight(config: dict[str, Any], config_path: Path, raw_root: Path, output: Path, source_override: Path | None, logger: logging.Logger) -> None:
     if complete(output, "preflight"):
-        logger.info("preflight already complete; reusing verified source")
-        return
+        cached = json.loads((output / "preflight.json").read_text(encoding="utf-8"))
+        cached_source = source_path(config, source_override)
+        if cached.get("config_sha256") == sha256_file(config_path) and cached.get("source_sha256") == sha256_file(cached_source):
+            logger.info("preflight already complete; reusing verified source")
+            return
+        logger.info("preflight marker does not match current config/source; refreshing validation")
     started = time.perf_counter()
     runtime = runtime_info().as_dict()
     require_cuda()
@@ -145,9 +149,16 @@ def stage_preflight(config: dict[str, Any], config_path: Path, raw_root: Path, o
         raise FileNotFoundError(f"Current expert prediction source is missing: {source}")
     frame = pd.read_parquet(source)
     validation = validate_prediction_source(frame, expected_seeds=DEVELOPMENT_SEEDS, allow_holdouts=False)
+    observed_hash = sha256_file(source)
+    expected_hash = config.get("sources", {}).get("development_predictions_sha256")
+    if expected_hash and observed_hash != expected_hash:
+        raise RuntimeError(
+            "Current expert source hash mismatch: "
+            f"expected {expected_hash}, observed {observed_hash}"
+        )
     validation.update({
         "source_path": str(source),
-        "source_sha256": sha256_file(source),
+        "source_sha256": observed_hash,
         "config_path": str(config_path),
         "config_sha256": sha256_file(config_path),
         "raw_root": str(raw_root),
