@@ -69,6 +69,73 @@ class SpectrogramStandardizer:
             output[~mask] = 0.0
         return output
 
+    def view(self, values: np.ndarray, valid_mask: np.ndarray | None = None) -> "StandardizedSpectrogramView":
+        """Return a lazy standardized view over an unnormalized cache."""
+
+        return StandardizedSpectrogramView(values, self, valid_mask=valid_mask)
+
+
+class StandardizedSpectrogramView:
+    """Array-like lazy view applying a train-only standardizer per item.
+
+    The raw cache remains unnormalized and memmap-compatible.  Only the item
+    requested by a DataLoader is transformed, so a fold-specific standardizer
+    never requires a second global standardized cache.
+    """
+
+    def __init__(
+        self,
+        values: np.ndarray,
+        standardizer: SpectrogramStandardizer,
+        *,
+        valid_mask: np.ndarray | None = None,
+    ) -> None:
+        shape = getattr(values, "shape", None)
+        if shape is None or len(shape) < 4:
+            raise ValueError("Spectrogram values must expose a signal-first array shape")
+        if valid_mask is not None:
+            mask_shape = getattr(valid_mask, "shape", None)
+            if len(shape) != 6 or mask_shape != tuple(shape[:3]):
+                raise ValueError("Bag valid_mask must match [signals, halves, pulses]")
+        self.values = values
+        self.standardizer = standardizer
+        self.valid_mask = valid_mask
+        self.shape = tuple(shape)
+        self.dtype = np.dtype(np.float32)
+
+    def __len__(self) -> int:
+        return int(self.shape[0])
+
+    def __getitem__(self, index: Any) -> np.ndarray:
+        raw = np.asarray(self.values[index], dtype=np.float32)
+        if not np.isfinite(raw).all():
+            raise ValueError("Spectrogram cache contains non-finite values")
+        transformed = ((raw - self.standardizer.mean) / self.standardizer.std).astype(np.float32)
+        if self.valid_mask is not None:
+            mask = np.asarray(self.valid_mask[index], dtype=bool)
+            transformed[~mask] = 0.0
+        return transformed
+
+
+class IndexedArrayView:
+    """Lazy first-axis subset used to preserve large memmap caches."""
+
+    def __init__(self, values: np.ndarray, indices: np.ndarray) -> None:
+        shape = getattr(values, "shape", None)
+        selected = np.asarray(indices, dtype=np.int64)
+        if shape is None or selected.ndim != 1 or np.any(selected < 0) or np.any(selected >= shape[0]):
+            raise ValueError("Invalid indexed view selection")
+        self.values = values
+        self.indices = selected
+        self.shape = (len(selected), *tuple(shape[1:]))
+        self.dtype = getattr(values, "dtype", np.dtype(np.float32))
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: Any) -> np.ndarray:
+        return self.values[self.indices[index]]
+
 
 def compute_stft_log_power(values: np.ndarray, spec: STFTSpec) -> np.ndarray:
     """Return finite float32 ``[N, 1, frequencies, time]`` log-power STFTs."""
@@ -103,28 +170,45 @@ def fit_spectrogram_standardizer(
 ) -> SpectrogramStandardizer:
     """Fit statistics only on selected signals or valid bag events."""
 
-    array = np.asarray(values, dtype=np.float32)
+    array = values
+    shape = getattr(array, "shape", None)
+    if shape is None:
+        raise ValueError("values must expose a signal-first array shape")
     selected = np.asarray(indices, dtype=np.int64)
-    if selected.ndim != 1 or selected.size == 0 or np.any(selected < 0) or np.any(selected >= len(array)):
+    if selected.ndim != 1 or selected.size == 0 or np.any(selected < 0) or np.any(selected >= shape[0]):
         raise ValueError("indices must be non-empty valid signal indices")
-    if not np.isfinite(array).all():
-        raise ValueError("Cannot fit a standardizer from non-finite values")
-    if valid_mask is None:
-        samples = array[selected]
-    else:
+    if valid_mask is not None:
         mask = np.asarray(valid_mask, dtype=bool)
-        if array.ndim != 6 or mask.shape != array.shape[:3]:
+        if len(shape) != 6 or mask.shape != tuple(shape[:3]):
             raise ValueError("Bag standardization expects values [N,2,K,1,F,T] and [N,2,K] mask")
-        chosen = mask[selected]
-        samples = array[selected][chosen]
-        if len(samples) == 0:
-            raise ValueError("No valid bag events selected for standardization")
-    flattened = samples.reshape(-1, *samples.shape[-2:])
-    mean = flattened.mean(axis=0, keepdims=True, dtype=np.float64).astype(np.float32)
-    std = flattened.std(axis=0, keepdims=True, dtype=np.float64).astype(np.float32)
+    else:
+        mask = None
+    sum_values: np.ndarray | None = None
+    sum_squares: np.ndarray | None = None
+    count = 0
+    for start in range(0, len(selected), 32):
+        chosen_indices = selected[start:start + 32]
+        chunk = np.asarray(array[chosen_indices], dtype=np.float32)
+        if not np.isfinite(chunk).all():
+            raise ValueError("Cannot fit a standardizer from non-finite values")
+        if mask is not None:
+            chunk = chunk[mask[chosen_indices]]
+        flattened = chunk.reshape(-1, *chunk.shape[-2:])
+        if len(flattened) == 0:
+            continue
+        chunk_sum = flattened.sum(axis=0, dtype=np.float64)
+        chunk_squares = np.square(flattened, dtype=np.float64).sum(axis=0)
+        sum_values = chunk_sum if sum_values is None else sum_values + chunk_sum
+        sum_squares = chunk_squares if sum_squares is None else sum_squares + chunk_squares
+        count += len(flattened)
+    if count == 0 or sum_values is None or sum_squares is None:
+        raise ValueError("No valid samples selected for standardization")
+    mean = (sum_values / count).astype(np.float32)[None, ...]
+    variance = np.maximum(sum_squares / count - np.square(mean.astype(np.float64)), 0.0)
+    std = np.sqrt(variance).astype(np.float32)
     std[std < 1e-6] = 1.0
-    payload = mean.tobytes() + std.tobytes() + str(int(len(flattened))).encode()
-    return SpectrogramStandardizer(mean=mean, std=std, fit_count=int(len(flattened)), fingerprint=hashlib.sha256(payload).hexdigest())
+    payload = mean.tobytes() + std.tobytes() + str(int(count)).encode()
+    return SpectrogramStandardizer(mean=mean, std=std, fit_count=int(count), fingerprint=hashlib.sha256(payload).hexdigest())
 
 
 def cache_fingerprint(metadata: dict[str, Any]) -> str:
@@ -209,7 +293,7 @@ def build_vsb_event_spectrogram_dataset(
 
 
 __all__ = [
-    "STFTSpec", "SpectrogramStandardizer", "cache_fingerprint",
+    "STFTSpec", "SpectrogramStandardizer", "StandardizedSpectrogramView", "IndexedArrayView", "cache_fingerprint",
     "compute_stft_log_power", "fit_spectrogram_standardizer",
     "write_atomic_array_cache", "require_valid_cache", "build_matlab_spectrogram_dataset",
     "build_vsb_event_spectrogram_dataset",

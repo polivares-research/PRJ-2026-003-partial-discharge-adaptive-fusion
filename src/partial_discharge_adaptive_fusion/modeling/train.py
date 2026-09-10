@@ -5,6 +5,7 @@ from __future__ import annotations
 import gc
 import random
 from dataclasses import dataclass
+from typing import Callable, Any
 import numpy as np
 import torch
 from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
@@ -69,8 +70,9 @@ def train_expert(
     persistent_workers: bool = False,
     prefetch_factor: int = 2,
     mixed_precision: bool = False,
+    epoch_selection: str = "validation",
 ) -> TrainingResult:
-    """Train one expert on CUDA and select the epoch using validation MCC."""
+    """Train one expert on CUDA with validation or registered fixed epochs."""
 
     device = require_cuda()
     if batch_size < 1:
@@ -83,6 +85,8 @@ def train_expert(
         raise ValueError("num_workers must be non-negative and prefetch_factor must be positive.")
     if num_workers == 0 and persistent_workers:
         raise ValueError("persistent_workers requires num_workers > 0.")
+    if epoch_selection not in {"validation", "fixed"}:
+        raise ValueError("epoch_selection must be 'validation' or 'fixed'")
     set_seed(seed)
     model = (
         make_multi_instance_expert(
@@ -95,11 +99,14 @@ def train_expert(
     ).to(device)
     dataset_class = MultiInstanceDataset if multi_instance else NumpyDataset
     train_dataset = dataset_class(train_x, train_y, train_indices)
-    validation_dataset = dataset_class(validation_x, validation_y, validation_indices)
-    selection_labels = (
-        np.asarray(validation_y) if validation_indices is None
-        else np.asarray(validation_y)[np.asarray(validation_indices, dtype=np.int64)]
-    )
+    validation_dataset = None
+    selection_labels = None
+    if epoch_selection == "validation":
+        validation_dataset = dataset_class(validation_x, validation_y, validation_indices)
+        selection_labels = (
+            np.asarray(validation_y) if validation_indices is None
+            else np.asarray(validation_y)[np.asarray(validation_indices, dtype=np.int64)]
+        )
     generator = torch.Generator().manual_seed(seed)
     loader_options = {"num_workers": num_workers, "pin_memory": True}
     validation_options = {"num_workers": num_workers, "pin_memory": True}
@@ -109,7 +116,7 @@ def train_expert(
     loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True, generator=generator, **loader_options,
     )
-    validation_loader = DataLoader(
+    validation_loader = None if validation_dataset is None else DataLoader(
         validation_dataset, batch_size=validation_batch_size or max(batch_size, 512), shuffle=False,
         **validation_options,
     )
@@ -135,18 +142,23 @@ def train_expert(
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             losses.append(float(loss.detach().cpu()))
-        validation_logits = predict_logits(model, validation_loader, device, mixed_precision=mixed_precision)
-        validation_mcc = _mcc(selection_labels, validation_logits >= 0.0)
-        history.append({"epoch": float(epoch), "train_loss": float(np.mean(losses)), "val_mcc_at_0.5": validation_mcc})
-        if validation_mcc > best_mcc + 1e-12:
-            best_mcc = validation_mcc
+        if epoch_selection == "fixed":
             best_epoch = epoch
             best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
-            stale = 0
+            history.append({"epoch": float(epoch), "train_loss": float(np.mean(losses)), "val_mcc_at_0.5": float("nan")})
         else:
-            stale += 1
-        if stale >= patience:
-            break
+            validation_logits = predict_logits(model, validation_loader, device, mixed_precision=mixed_precision)
+            validation_mcc = _mcc(selection_labels, validation_logits >= 0.0)
+            history.append({"epoch": float(epoch), "train_loss": float(np.mean(losses)), "val_mcc_at_0.5": validation_mcc})
+            if validation_mcc > best_mcc + 1e-12:
+                best_mcc = validation_mcc
+                best_epoch = epoch
+                best_state = {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
+                stale = 0
+            else:
+                stale += 1
+            if stale >= patience:
+                break
     if best_state is None:
         raise RuntimeError("No valid model state was produced.")
     model.load_state_dict(best_state)
@@ -219,22 +231,26 @@ def cross_fitted_logits(
     persistent_workers: bool = False,
     prefetch_factor: int = 2,
     mixed_precision: bool = False,
+    fold_transform: Callable[[Any, np.ndarray, np.ndarray, int], Any] | None = None,
+    epoch_selection: str = "validation",
 ) -> CrossFitResult:
     """Generate leakage-safe OOF logits with fold-local validation.
 
-    The outer holdout is never passed to ``train_expert``.  An inner split of
-    the outer-fit data supplies epoch selection, which prevents validation
-    labels from becoming in-sample OOF predictions.  ``folds`` is supplied by
-    the frozen manifest and is reused across seeds; models and logits are
-    regenerated independently for every seed.
+    When ``epoch_selection='fixed'``, the full outer-fit fold is used for the
+    registered number of epochs and no validation labels are consulted.  A
+    fold transform may fit a normalizer on the outer-fit indices and return a
+    lazy or materialized transformed view.  ``folds`` is supplied by the
+    frozen manifest and is reused across seeds.
     """
 
     require_cuda()
     # Keep float16/float32 memmaps lazy; NumpyDataset casts one item at a time.
-    inputs = np.asarray(inputs)
+    shape = getattr(inputs, "shape", None)
+    if shape is None:
+        raise ValueError("inputs must expose a signal-first shape")
     labels = np.asarray(labels, dtype=np.int64)
     folds = np.asarray(folds, dtype=np.int64)
-    if inputs.shape[0] != len(labels) or len(folds) != len(labels):
+    if shape[0] != len(labels) or len(folds) != len(labels):
         raise ValueError("Inputs, labels, and folds must have the same number of samples.")
     unique_folds = np.unique(folds)
     if len(unique_folds) < 2 or np.any(unique_folds < 0):
@@ -251,16 +267,21 @@ def cross_fitted_logits(
         holdout = np.flatnonzero(folds == fold)
         fit = np.flatnonzero(folds != fold)
         fit_groups = groups[fit] if groups is not None else None
-        inner_count = min(inner_splits, len(np.unique(fit_groups)) if fit_groups is not None else len(fit))
-        if inner_count < 2:
-            raise ValueError("Not enough outer-fit samples/groups for inner validation.")
-        inner = fold_assignments(
-            labels[fit], groups=fit_groups, n_splits=inner_count, seed=seed + 1009 * int(fold),
-        )
-        inner_validation = fit[inner == 0]
-        inner_train = fit[inner != 0]
+        if epoch_selection == "fixed":
+            inner_train = fit
+            inner_validation = np.empty(0, dtype=np.int64)
+        else:
+            inner_count = min(inner_splits, len(np.unique(fit_groups)) if fit_groups is not None else len(fit))
+            if inner_count < 2:
+                raise ValueError("Not enough outer-fit samples/groups for inner validation.")
+            inner = fold_assignments(
+                labels[fit], groups=fit_groups, n_splits=inner_count, seed=seed + 1009 * int(fold),
+            )
+            inner_validation = fit[inner == 0]
+            inner_train = fit[inner != 0]
+        fold_inputs = inputs if fold_transform is None else fold_transform(inputs, fit, holdout, int(fold))
         result = train_expert(
-            inputs, labels, inputs, labels,
+            fold_inputs, labels, fold_inputs, labels,
             kind=kind, seed=seed + int(fold), epochs=epochs, batch_size=batch_size,
             pos_weight=(
                 positive_class_weight(labels[inner_train])
@@ -279,12 +300,13 @@ def cross_fitted_logits(
             persistent_workers=persistent_workers,
             prefetch_factor=prefetch_factor,
             mixed_precision=mixed_precision,
+            epoch_selection=epoch_selection,
         )
         if multi_instance:
             from .predict import logits_and_window_summaries_for_indices
 
             fold_logits, fold_summaries = logits_and_window_summaries_for_indices(
-                result.model, inputs, holdout, batch_size=prediction_batch_size,
+                result.model, fold_inputs, holdout, batch_size=prediction_batch_size,
                 mixed_precision=mixed_precision,
             )
             for name, values in fold_summaries.items():
@@ -294,7 +316,7 @@ def cross_fitted_logits(
             from .predict import logits_for_indices
 
             fold_logits = logits_for_indices(
-                result.model, inputs, holdout, batch_size=prediction_batch_size,
+                result.model, fold_inputs, holdout, batch_size=prediction_batch_size,
                 mixed_precision=mixed_precision,
             )
         logits[holdout] = fold_logits

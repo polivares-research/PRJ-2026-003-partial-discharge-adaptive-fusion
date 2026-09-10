@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-from .evaluation import fast_mcc
+from .evaluation import binary_metrics, fast_mcc
 from .fusion import select_threshold
 
 
@@ -61,10 +61,16 @@ def prediction_overlap_oracle(
     """Return overlap states and oracle headroom for aligned parent predictions."""
 
     y = np.asarray(labels, dtype=np.int64)
-    temporal = np.asarray(temporal_prediction, dtype=np.int64)
-    spectrogram = np.asarray(spectrogram_prediction, dtype=np.int64)
+    temporal_raw = np.asarray(temporal_prediction)
+    spectrogram_raw = np.asarray(spectrogram_prediction)
+    if not np.isfinite(temporal_raw).all() or not np.isfinite(spectrogram_raw).all():
+        raise ValueError("Prediction overlap requires finite binary predictions")
+    temporal = temporal_raw.astype(np.int64)
+    spectrogram = spectrogram_raw.astype(np.int64)
     if len(y) == 0 or not (len(y) == len(temporal) == len(spectrogram)):
         raise ValueError("Prediction arrays must be non-empty and aligned")
+    if not np.isin(temporal, [0, 1]).all() or not np.isin(spectrogram, [0, 1]).all():
+        raise ValueError("Prediction overlap requires binary predictions")
     if group_ids is not None and len(group_ids) != len(y):
         raise ValueError("group_ids must align with predictions")
     correct_t = temporal == y
@@ -94,6 +100,74 @@ def prediction_overlap_oracle(
     }
 
 
+def probability_summary(probability: np.ndarray) -> dict[str, float]:
+    """Return finite, model-agnostic probability diagnostics."""
+
+    values = np.asarray(probability, dtype=np.float64)
+    if values.size == 0 or not np.isfinite(values).all() or not ((values >= 0) & (values <= 1)).all():
+        raise ValueError("Probabilities must be finite and in [0,1]")
+    return {
+        "count": int(values.size), "min": float(values.min()), "max": float(values.max()),
+        "mean": float(values.mean()), "median": float(np.median(values)),
+        "p01": float(np.quantile(values, 0.01)), "p10": float(np.quantile(values, 0.10)),
+        "p90": float(np.quantile(values, 0.90)), "p99": float(np.quantile(values, 0.99)),
+    }
+
+
+def threshold_curve(
+    labels: np.ndarray,
+    probability: np.ndarray,
+    thresholds: Iterable[float] = tuple(np.arange(0.05, 0.951, 0.005)),
+) -> list[dict[str, float | int]]:
+    """Calculate the registered threshold curve without selecting on validation."""
+
+    y = np.asarray(labels, dtype=np.int64)
+    p = np.asarray(probability, dtype=np.float64)
+    if len(y) != len(p) or len(y) == 0 or not np.isfinite(p).all():
+        raise ValueError("Threshold-curve inputs are not finite and aligned")
+    rows = []
+    for threshold in thresholds:
+        value = float(threshold)
+        metrics = binary_metrics(y, p, value)
+        rows.append({"threshold": value, **metrics, "predicted_positive_fraction": float(np.mean(p >= value))})
+    return rows
+
+
+def select_fixed_weight_oof(
+    validation_labels: np.ndarray,
+    validation_temporal: np.ndarray,
+    validation_spectrogram: np.ndarray,
+    oof_labels: np.ndarray,
+    oof_temporal: np.ndarray,
+    oof_spectrogram: np.ndarray,
+    weights: Iterable[float] = tuple(np.arange(0.0, 1.001, 0.05)),
+) -> tuple[list[dict[str, float]], dict[str, float]]:
+    """Select fixed mixture weights and thresholds strictly on OOF data."""
+
+    y_val = np.asarray(validation_labels, dtype=np.int64)
+    t_val, s_val = np.asarray(validation_temporal, float), np.asarray(validation_spectrogram, float)
+    y_oof = np.asarray(oof_labels, dtype=np.int64)
+    t_oof, s_oof = np.asarray(oof_temporal, float), np.asarray(oof_spectrogram, float)
+    if len(y_val) != len(t_val) or len(y_val) != len(s_val) or len(y_oof) != len(t_oof) or len(y_oof) != len(s_oof):
+        raise ValueError("Mixture inputs are not aligned")
+    rows: list[dict[str, float]] = []
+    for raw_weight in weights:
+        weight = float(raw_weight)
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError("Mixture weights must be in [0,1]")
+        oof_probability = weight * t_oof + (1.0 - weight) * s_oof
+        threshold = select_threshold(y_oof, oof_probability)
+        validation_probability = weight * t_val + (1.0 - weight) * s_val
+        oof_mcc = fast_mcc(y_oof, oof_probability >= threshold)
+        validation_metrics = binary_metrics(y_val, validation_probability, threshold)
+        rows.append({
+            "temporal_weight": weight, "threshold": float(threshold),
+            "oof_mcc": float(oof_mcc), "validation_mcc": float(validation_metrics["mcc"]),
+        })
+    best = max(rows, key=lambda row: (row["oof_mcc"], -abs(row["temporal_weight"] - 0.5)))
+    return rows, dict(best)
+
+
 def fixed_probability_diagnostics(
     labels: np.ndarray,
     temporal_probability: np.ndarray,
@@ -109,7 +183,7 @@ def fixed_probability_diagnostics(
     s = np.asarray(spectrogram_probability, dtype=float)
     if not (len(y) == len(t) == len(s)):
         raise ValueError("Validation probabilities are not aligned")
-    oof_y = np.asarray(y if len(oof_temporal) == len(y) else np.zeros(0), dtype=np.int64)
+    oof_y = np.asarray(y, dtype=np.int64) if len(oof_temporal) == len(y) else np.asarray([], dtype=np.int64)
     if len(oof_temporal) != len(oof_spectrogram):
         raise ValueError("OOF probability arrays are not aligned")
     rows = []
@@ -166,5 +240,6 @@ def classify_cross_dataset_verdict(summary: dict[str, Any]) -> str:
 
 __all__ = [
     "ALLOWED_VERDICTS", "aggregate_event_predictions", "prediction_overlap_oracle",
+    "probability_summary", "threshold_curve", "select_fixed_weight_oof",
     "fixed_probability_diagnostics", "validate_parent_predictions", "classify_cross_dataset_verdict",
 ]
