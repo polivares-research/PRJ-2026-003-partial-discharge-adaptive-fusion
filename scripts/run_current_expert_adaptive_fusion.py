@@ -38,6 +38,7 @@ from partial_discharge_adaptive_fusion.current_expert_fusion import (  # noqa: E
     sha256_file,
     validate_prediction_source,
 )
+from partial_discharge_adaptive_fusion.current_expert_fusion import _apply_components  # noqa: E402
 from partial_discharge_adaptive_fusion.dataset import load_mat_partition, resolve_dataset  # noqa: E402
 from partial_discharge_adaptive_fusion.evaluation import binary_metrics  # noqa: E402
 from partial_discharge_adaptive_fusion.fusion import select_threshold  # noqa: E402
@@ -228,7 +229,7 @@ def stage_matlab_clean(config: dict[str, Any], raw_root: Path, output: Path, sou
             torch.cuda.empty_cache()
     keep = ~((source["dataset"].astype(str) == "matlab") & (source["method"].astype(str) == "temporal"))
     merged = pd.concat([source.loc[keep], *rows], ignore_index=True)
-    merged.to_parquet(output / "development_predictions.parquet", index=False)
+    merged.to_parquet(output / "clean_development_predictions.parquet", index=False)
     payload = {
         "status": "PASS", "seeds": list(DEVELOPMENT_SEEDS), "epochs": epochs,
         "selection": "fixed", "normalization": "fold_local_train_only",
@@ -250,7 +251,7 @@ def stage_development_fusion(config: dict[str, Any], output: Path, logger: loggi
     if not complete(output, "matlab_clean"):
         raise RuntimeError("Run matlab_clean before development_fusion")
     started = time.perf_counter()
-    source = pd.read_parquet(output / "development_predictions.parquet")
+    source = pd.read_parquet(output / "clean_development_predictions.parquet")
     validate_prediction_source(source, expected_seeds=DEVELOPMENT_SEEDS, allow_holdouts=False)
     metric_rows: list[dict[str, Any]] = []
     prediction_rows: list[pd.DataFrame] = []
@@ -428,7 +429,71 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
     logger.info("report written: %s", report_path)
 
 
-def stage_confirmatory(config: dict[str, Any], output: Path, logger: logging.Logger) -> None:
+def _run_confirmatory_handoff(output: Path, source_path_value: Path, logger: logging.Logger) -> None:
+    """Evaluate a fresh all-development five-seed expert handoff.
+
+    Expert generation is deliberately explicit: this stage consumes a parquet
+    produced after freeze and validates that it contains only the eligible
+    holdout split. It cannot be reached by the development all command.
+    """
+    frozen = yaml.safe_load((output / "frozen_config.yaml").read_text(encoding="utf-8"))
+    eligible = set(frozen.get("freeze_record", {}).get("eligible_datasets", []))
+    if not eligible:
+        raise RuntimeError("No dataset was eligible at freeze; holdouts remain locked")
+    if not source_path_value.is_file():
+        raise FileNotFoundError(f"Fresh confirmatory expert handoff is missing: {source_path_value}")
+    source = pd.read_parquet(source_path_value)
+    validate_prediction_source(source, expected_seeds=(42, 43, 44, 45, 46), allow_holdouts=True)
+    holdout_splits = {"matlab": "test_confirmatory", "vsb": "test_grouped_holdout"}
+    holdout_rows = source[source["split"].isin(["test", "test_confirmatory", "test_grouped_holdout"])]
+    allowed_holdout_pairs = {(dataset, holdout_splits[dataset]) for dataset in eligible}
+    observed_holdout_pairs = set(zip(holdout_rows["dataset"].astype(str), holdout_rows["split"].astype(str)))
+    if observed_holdout_pairs - allowed_holdout_pairs:
+        raise RuntimeError("Confirmatory source contains a holdout for an ineligible dataset or an unexpected split")
+    if not observed_holdout_pairs:
+        raise RuntimeError("Confirmatory source contains no eligible holdout rows")
+    metric_rows: list[dict[str, Any]] = []
+    prediction_rows: list[pd.DataFrame] = []
+    for dataset in sorted(eligible):
+        split = holdout_splits[dataset]
+        for seed in (42, 43, 44, 45, 46):
+            train_pair = canonical_pair_frame(source, dataset=dataset, seed=seed, split="train_oof")
+            holdout_pair = canonical_pair_frame(source, dataset=dataset, seed=seed, split=split)
+            _, components, _ = cross_fitted_meta_oof(train_pair, dataset=dataset, seed=seed, n_splits=5)
+            applied = _apply_components(
+                components,
+                holdout_pair["probability_temporal"].to_numpy(float),
+                holdout_pair["probability_global_spectrogram"].to_numpy(float),
+            )
+            probability_frame = holdout_pair[["sample_id", "id_measurement", "phase", "target"]].copy()
+            for method, values in applied.items():
+                probability_frame[f"probability_{method}"] = values
+            probability_frame["probability_best_individual"] = probability_frame[f"probability_{components.best_individual}"]
+            thresholds = component_thresholds(components)
+            metric_rows.extend(evaluate_pair_methods(holdout_pair, probability_frame, split=split, seed=seed, thresholds=thresholds, dataset=dataset))
+            probability_frame["dataset"] = dataset
+            probability_frame["seed"] = int(seed)
+            probability_frame["split"] = split
+            for method, threshold in thresholds.items():
+                probability_frame[f"threshold_{method}"] = float(threshold)
+            prediction_rows.append(probability_frame)
+            logger.info("%s confirmatory seed %d evaluated on %s", dataset, seed, split)
+    metrics_frame = pd.DataFrame(metric_rows)
+    predictions_frame = pd.concat(prediction_rows, ignore_index=True)
+    write_frame(output / "confirmatory_metrics.csv", metrics_frame)
+    write_frame(output / "confirmatory_predictions.parquet", predictions_frame)
+    payload = {
+        "status": "PASS", "datasets": sorted(eligible), "seeds": [42, 43, 44, 45, 46],
+        "source_path": str(source_path_value), "source_sha256": sha256_file(source_path_value),
+        "holdout_splits": holdout_splits, "holdouts_opened": sorted(eligible),
+        "metrics_rows": int(len(metrics_frame)),
+    }
+    write_json(output / "confirmatory_summary.json", payload | {"metrics": metrics_frame.to_dict(orient="records")})
+    finish(output, "confirmatory", payload)
+    logger.info("confirmatory PASS: datasets=%s rows=%d", ",".join(sorted(eligible)), len(metrics_frame))
+
+
+def stage_confirmatory(config: dict[str, Any], output: Path, source_path_value: Path | None, logger: logging.Logger) -> None:
     """Guard the future confirmatory entry point.
 
     The implementation intentionally refuses to open a holdout unless the
@@ -442,7 +507,8 @@ def stage_confirmatory(config: dict[str, Any], output: Path, logger: logging.Log
     frozen = yaml.safe_load((output / "frozen_config.yaml").read_text(encoding="utf-8"))
     if frozen.get("protocol_status") != "frozen":
         raise RuntimeError("Frozen configuration marker is invalid")
-    raise RuntimeError("Confirmatory expert generation is intentionally a separate post-freeze implementation stage; no holdout was opened")
+    source_path_value = source_path_value or (output / "confirmatory_predictions.parquet")
+    _run_confirmatory_handoff(output, source_path_value, logger)
 
 
 def main() -> int:
@@ -450,6 +516,7 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--raw-root", type=Path, default=None)
     parser.add_argument("--source-predictions", type=Path, default=None)
+    parser.add_argument("--confirmatory-source", type=Path, default=None)
     parser.add_argument("--stage", choices=("preflight", "matlab_clean", "development_fusion", "freeze", "report", "confirmatory", "all"), default="all")
     parser.add_argument("--log-file", type=str, default=None)
     args = parser.parse_args()
@@ -463,7 +530,7 @@ def main() -> int:
         "development_fusion": lambda: stage_development_fusion(config, output, logger),
         "freeze": lambda: stage_freeze(config, args.config, output, logger),
         "report": lambda: stage_report(config, output, logger),
-        "confirmatory": lambda: stage_confirmatory(config, output, logger),
+        "confirmatory": lambda: stage_confirmatory(config, output, args.confirmatory_source, logger),
     }
     order = ["preflight", "matlab_clean", "development_fusion", "freeze", "report"] if args.stage == "all" else [args.stage]
     for stage in order:
