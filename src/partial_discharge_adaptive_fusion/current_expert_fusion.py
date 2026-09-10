@@ -82,8 +82,14 @@ def validate_prediction_source(
         ["test", "test_confirmatory", "test_grouped_holdout", "official_unlabeled_test"]
     ).any():
         raise ValueError("Holdout rows are forbidden in development expert sources")
-    if not source["split"].isin(["train_oof", "validation"]).all():
-        raise ValueError("Development source may contain only train_oof and validation rows")
+    allowed_splits = {"train_oof", "validation"}
+    if allow_holdouts:
+        allowed_splits |= {"test", "test_confirmatory", "test_grouped_holdout"}
+    if not source["split"].isin(sorted(allowed_splits)).all():
+        raise ValueError(
+            "Prediction source contains an unsupported split; allowed splits are "
+            f"{sorted(allowed_splits)}"
+        )
     seeds = set(int(value) for value in expected_seeds)
     if set(source["seed"].unique()) != seeds:
         raise ValueError(f"Expected seeds {sorted(seeds)}, found {sorted(source['seed'].unique())}")
@@ -412,8 +418,14 @@ def fusion_gate(delta_summary: dict[str, Any], *, minimum_delta: float = 0.005, 
         record = delta_summary.get(name, {})
         seed_values = [float(value) for value in record.get("seed_deltas", [])]
         ci = record.get("hierarchical_ci", {}).get("ci_95", [float("-inf"), float("-inf")])
-        passed = bool(np.mean(seed_values) >= minimum_delta and sum(value > 0 for value in seed_values) >= minimum_positive_seeds and float(ci[0]) > ci_lower_bound)
-        candidates.append({"comparison": name, "passed": passed, "mean_delta": float(np.mean(seed_values)) if seed_values else float("nan"), "positive_seeds": int(sum(value > 0 for value in seed_values)), "ci_95": ci})
+        mean_delta = float(np.mean(seed_values)) if seed_values else float("nan")
+        passed = bool(
+            seed_values
+            and mean_delta >= minimum_delta
+            and sum(value > 0 for value in seed_values) >= minimum_positive_seeds
+            and float(ci[0]) > ci_lower_bound
+        )
+        candidates.append({"comparison": name, "passed": passed, "mean_delta": mean_delta, "positive_seeds": int(sum(value > 0 for value in seed_values)), "ci_95": ci})
     return {"eligible": any(row["passed"] for row in candidates), "candidates": candidates}
 
 
