@@ -540,6 +540,33 @@ def _markdown_table(frame: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
+def _historical_context(config: dict[str, Any]) -> dict[str, Any]:
+    """Read validation-only historical context without opening holdout rows."""
+
+    context: dict[str, Any] = {}
+    for name in ("matlab_metrics", "vsb_metrics"):
+        path = ROOT / config["historical_sources"][name]
+        if not path.is_file():
+            context[name] = {"status": "UNAVAILABLE"}
+            continue
+        frame = pd.read_csv(path)
+        if "split" in frame.columns:
+            frame = frame[frame["split"].astype(str).str.lower().eq("validation")]
+        # Context is deliberately restricted to compact method/seed/metric columns.
+        keep = [column for column in ("seed", "method", "expert", "mcc", "threshold") if column in frame.columns]
+        context[name] = {"status": "HISTORICAL_VALIDATION_ONLY", "rows": frame[keep].to_dict(orient="records")}
+    local_path = ROOT / config["historical_sources"]["local_event_report"]
+    if local_path.is_file():
+        try:
+            local = json.loads(local_path.read_text(encoding="utf-8"))
+            context["local_event_report"] = {"status": "HISTORICAL_CONTEXT_ONLY", "verdict": local.get("verdict"), "metrics": local.get("metrics", [])}
+        except (OSError, json.JSONDecodeError):
+            context["local_event_report"] = {"status": "UNAVAILABLE"}
+    else:
+        context["local_event_report"] = {"status": "UNAVAILABLE"}
+    return context
+
+
 def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -> None:
     if complete(output, "report"):
         logger.info("report already complete; reusing curated report")
@@ -550,6 +577,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
     bootstrap_frame = pd.read_json(output / "bootstrap_deltas.json")
     regression = json.loads((output / "regression.json").read_text(encoding="utf-8"))
     verdict = classify_verdict(config, metric_frame, bootstrap_frame, bool(regression["passed"]))
+    historical = _historical_context(config)
     summary = {
         "verdict": verdict,
         "regression_ok": bool(regression["passed"]),
@@ -557,6 +585,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
         "bootstrap": bootstrap_frame.to_dict(orient="records"),
         "hierarchical_bootstrap": json.loads((output / "hierarchical_bootstrap.json").read_text(encoding="utf-8")),
         "regression": regression,
+        "historical_context": historical,
         "representation": "one global VSB 800000-sample log10-power STFT; no event detector, local windows, MIL, mask, CWT rerun, or adaptive fusion",
         "holdouts": "locked",
         "recommendation": "Do not interpret scientifically until the temporal regression and all input/provenance checks pass.",
@@ -572,6 +601,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
         "## INTERPRETATION", "",
         "Fixed mixtures are diagnostic-only. A failed temporal regression forces `INCONCLUSIVE`, even if a spectrogram result appears strong.", "",
         "The result is intended to distinguish a representation limitation from the prior local-event implementation; it does not constitute adaptive fusion confirmation.", "",
+        "Historical CWT and local-event values are reported only as validation-set context. Any historical CSV rows labelled as holdout/test are excluded from this report.", "",
         "## UNRESOLVED", "",
         "The experiment is not executed by the implementation turn. Historical local-event and CWT results remain contextual and are not rerun here. Literature frequency concepts are not treated as a direct reproduction.", "",
         "## Reproducibility", "",
