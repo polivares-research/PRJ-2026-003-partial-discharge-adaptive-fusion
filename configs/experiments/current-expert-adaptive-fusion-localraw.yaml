@@ -1,0 +1,111 @@
+config_version: current-expert-adaptive-fusion-v1
+protocol_status: development_selection
+branch_contract: feature/current-expert-adaptive-fusion
+objective: Confirm current temporal/global-spectrogram adaptive fusion without historical regression gates
+data_source:
+  type: local_raw
+  root_environment_variable: PD_RAW_DATA_ROOT
+  default_relative_root: data/raw
+datasets:
+  engineering-partial-discharge-noise-signals:
+    version: v1
+    role: matlab_pd_noise
+    local_directory: dataset-pd-noise
+    train: Tr1.mat
+    validation: Va1.mat
+    secondary_test: Te1.mat
+    confirmatory_test: Te2.mat
+    input_policy:
+      status: frozen
+      temporal: standardized_400_sample_signal
+      spectrogram: global_hann_log_power_stft_65x22
+      cwt: morlet_log_power_32_scales_120_time_bins
+    grouping: source_partitions
+  engineering-vsb-power-line-fault-detection:
+    version: 2018-kaggle-snapshot
+    role: vsb_pd
+    local_directory: dataset-vsb-power-line-fault-detection
+    labeled_source: train.parquet + metadata_train.csv
+    official_test: excluded_from_scientific_metrics_because_unlabeled
+    input_policy:
+      status: frozen
+      temporal: forensic_s_plus_t_145_predictors
+      spectrogram: global_hann_log_power_stft_250x3124
+    grouping: id_measurement
+splits:
+  split_seed: 42
+  oof_folds: 5
+  meta_oof_seed_offset: 10000
+  preserve_source_matlab_partitions: true
+  vsb_group_column: id_measurement
+  vsb_development_manifest: results/audits/vsb-literature-forensic/manifest.csv
+  blocked_splits: [test_confirmatory, test_grouped_holdout, official_unlabeled_test]
+seeds: [42, 43, 44, 45, 46]
+development_seeds: [42, 43, 44]
+experts:
+  batch_size: 4
+  inference_batch_size: 32
+  gradient_accumulation_steps: 1
+  matlab_temporal:
+    architecture: TinyTemporalCNN
+    epochs: 9
+    epoch_selection: fixed
+    normalization: fold_local_train_only
+  vsb_temporal:
+    classifier: hist_gradient_boosting
+    feature_set: S+T
+    predictors: 145
+    source: results/audits/vsb-literature-forensic
+  global_spectrogram:
+    representation: current_full_signal_global_log10_power_stft
+    matlab_epochs: 5
+    vsb_epochs: 7
+    source: results/audits/full-signal-spectrogram-cross-dataset/validation_predictions.parquet
+fusion:
+  methods: [fixed_50_50, best_fixed, adaptive, conservative]
+  fixed_weight_grid: 0.0_to_1.0_step_0.05
+  threshold_grid: 0.05_to_0.95_step_0.005
+  meta_oof_folds: 5
+  calibration: cross_fitted_platt
+  reliability_model: logistic_correctness
+  reliability_features: [probability, logit, confidence, entropy, disagreement, agreement]
+  conservative_delta_grid: [0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.25]
+  reliability_weight_formula: r_i_divided_by_sum_plus_epsilon
+gates:
+  vsb_spectrogram_mean_mcc_min: 0.55
+  vsb_spectrogram_seed_mcc_min: 0.50
+  matlab_expert_mean_mcc_min: 0.90
+  matlab_expert_seed_mcc_min: 0.85
+  fusion_mean_delta_mcc_min: 0.005
+  fusion_positive_development_seeds_min: 2
+  fusion_ci_lower_bound_min: 0.0
+  confirmatory_positive_seeds_min: 4
+  confirmatory_recall_delta_min: -0.02
+statistics:
+  primary_metric: MCC
+  paired_bootstrap_iterations: 10000
+  hierarchical_seed_bootstrap: true
+  matlab_bootstrap_unit: sample_id
+  vsb_bootstrap_unit: id_measurement
+  mcnemar: exact_two_sided
+protection:
+  cuda_required_for_training: true
+  cpu_fallback: forbidden
+  te2_before_protocol_freeze: forbidden
+  vsb_holdout_before_protocol_freeze: forbidden
+  test_tuning: forbidden
+  historical_metrics_in_active_selection: forbidden
+  te1_usage: forbidden
+sources:
+  development_predictions: results/audits/full-signal-spectrogram-cross-dataset/validation_predictions.parquet
+  historical_matlab_reference: results/audits/full-signal-spectrogram-cross-dataset-matlab-reference/validation_predictions.parquet
+  historical_metrics_context_only:
+    - reports/metrics/v3-windowed/matlab_per_seed.csv
+    - reports/metrics/v3-windowed/vsb_per_seed.csv
+outputs:
+  cache_root: results/cache/current-expert-adaptive-fusion
+  audit_root: results/audits/current-expert-adaptive-fusion
+  figures: reports/figures/current-expert-adaptive-fusion
+  report: reports/audits/current_expert_adaptive_fusion.md
+  summary: reports/audits/current_expert_adaptive_fusion.json
+  manifest: reports/audits/current_expert_adaptive_fusion_manifest.md
