@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parents[2] / "src"))
 
 from partial_discharge_adaptive_fusion.modeling.models import SmallSpectrogram2DCNN
 from partial_discharge_adaptive_fusion.spectrogram import (
-    STFTSpec,
+    IndexedArrayView, STFTSpec,
     compute_stft_log_power,
     fit_spectrogram_standardizer,
     require_valid_cache,
@@ -17,7 +17,7 @@ from partial_discharge_adaptive_fusion.spectrogram import (
 from partial_discharge_adaptive_fusion.temporal_spectrogram import (
     aggregate_event_predictions,
     classify_cross_dataset_verdict,
-    prediction_overlap_oracle,
+    prediction_overlap_oracle, probability_summary, select_fixed_weight_oof, threshold_curve,
 )
 
 
@@ -51,6 +51,27 @@ def test_train_only_spectrogram_standardizer_and_cache(tmp_path):
     assert loaded.shape == values.shape
     with pytest.raises(ValueError, match="fingerprint"):
         require_valid_cache(path, "wrong")
+
+
+def test_lazy_standardized_view_matches_train_only_transform():
+    values = np.arange(4 * 1 * 3 * 1 * 4 * 5, dtype=np.float32).reshape(4, 1, 3, 1, 4, 5)
+    mask = np.ones((4, 1, 3), dtype=bool)
+    standardizer = fit_spectrogram_standardizer(values, np.array([0, 1]), mask)
+    view = standardizer.view(values, valid_mask=mask)
+    np.testing.assert_allclose(view[2], standardizer.transform(values[2:3], mask[2:3])[0])
+    assert IndexedArrayView(values, np.array([3, 1])).shape == (2, 1, 3, 1, 4, 5)
+
+
+def test_threshold_curve_and_fixed_weights_are_oof_only_interfaces():
+    labels = np.array([0, 0, 1, 1])
+    temporal = np.array([0.1, 0.2, 0.8, 0.9])
+    spectrogram = np.array([0.2, 0.3, 0.7, 0.8])
+    curve = threshold_curve(labels, temporal, thresholds=(0.2, 0.5))
+    assert [row["threshold"] for row in curve] == [0.2, 0.5]
+    assert probability_summary(temporal)["count"] == 4
+    rows, best = select_fixed_weight_oof(labels, temporal, spectrogram, labels, temporal, spectrogram, (0.0, 0.5, 1.0))
+    assert len(rows) == 3
+    assert 0.0 <= best["temporal_weight"] <= 1.0
 
 
 def test_masked_event_aggregation_returns_one_parent_probability():
