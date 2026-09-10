@@ -180,3 +180,5 @@ reports/figures/vsb-modality-contribution/**
 results/cache/temporal-spectrogram-cross-dataset/**
 results/audits/temporal-spectrogram-cross-dataset/**
 reports/figures/temporal-spectrogram-cross-dataset/**
+results/audits/temporal-spectrogram-cross-dataset-v2-repaired/**
+reports/figures/temporal-spectrogram-cross-dataset-v2-repaired/**

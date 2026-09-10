@@ -27,3 +27,13 @@ The only permitted executive verdicts are `TEMPORAL+SPECTROGRAM SUPPORTED`, `SPE
 ## Acceptance
 
 All generated artifacts stay under V5-diagnostic-specific ignored directories. Only the curated Markdown, JSON, and manifest may be committed after execution. A passing implementation must demonstrate deterministic STFT dimensions, non-wrapping pulse extraction, train-only normalization, one parent output, no holdout access, and reproducible source fingerprints.
+
+## Repair ledger — v2 repaired run
+
+**OBSERVED · COMPUTATIONAL.** The provisional implementation fitted a single MATLAB spectrogram standardizer before OOF and did not apply a spectrogram standardizer to the VSB pulse expert. It also selected neural epochs using the outer development validation partition and lacked complete OOF-only mixture, threshold, probability, and paired-bootstrap outputs.
+
+**PROPOSED · SCIENTIFIC.** The repaired implementation preserves the unnormalized raw cache, fits standardizers on each OOF outer-training fold, fits final standardizers on training data only, and applies them lazily. It uses fixed registered epochs (`MATLAB temporal=5`, `MATLAB spectrogram=5`, `VSB spectrogram=7`) and evaluates Va1/VSB validation exactly once after fitting.
+
+**INHERITED · SCIENTIFIC.** The previous report remains immutable and provisional. The repaired run uses a separate output root and report names so the original evidence can be audited against the corrected pipeline.
+
+**UNRESOLVED · DOCUMENTATION.** No execution, training, notebook, or test run is performed as part of the code repair; the manual commands in the reproducibility record are the required next step.
