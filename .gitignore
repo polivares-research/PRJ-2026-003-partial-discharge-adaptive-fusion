@@ -102,6 +102,9 @@ results/features/**
 # for the source repository; compact protocol manifests remain trackable.
 results/manifests/matlab_manifest.csv
 reports/figures/confirmatory/**
+results/cache/full-signal-spectrogram-cross-dataset/**
+results/audits/full-signal-spectrogram-cross-dataset/**
+reports/figures/full-signal-spectrogram-cross-dataset/**
 reports/metrics/confirmatory/**
 reports/statistical_analysis/confirmatory/**
 
