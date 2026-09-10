@@ -1,6 +1,6 @@
 # Cross-Dataset Temporal vs Spectrogram Diagnostic (Repaired Run)
 
-**Pipeline valid:** `False`  
+**Pipeline valid:** `False`
 **Scientific verdict:** `INCONCLUSIVE`
 
 This repaired run is separate from the prior provisional report. Raw caches are reused without modification; repaired predictions and reports use a new versioned output root.
