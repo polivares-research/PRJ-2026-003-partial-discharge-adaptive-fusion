@@ -469,7 +469,24 @@ def stage_evaluation(config: dict[str, Any], output: Path, logger: logging.Logge
         rows = bootstrap_frame[bootstrap_frame["dataset"] == dataset]
         if len(rows) == 3:
             deltas = rows["point_estimate"].to_numpy(float)
-            hierarchical.append({"dataset": dataset, "mean_delta": float(deltas.mean()), "sd_delta": float(deltas.std(ddof=1)), "min_delta": float(deltas.min()), "max_delta": float(deltas.max()), "positive_seeds": int((deltas > 0).sum()), "oracle_headroom_mean": float(rows["oracle_headroom"].mean())})
+            records = []
+            for seed in sorted(predictions.loc[predictions["dataset"] == dataset, "seed"].unique()):
+                current = predictions[(predictions["dataset"] == dataset) & (predictions["seed"] == seed) & (predictions["split"] == "validation")]
+                temporal = current[current["method"] == "temporal"].sort_values("sample_id")
+                spectrogram = current[current["method"] == "global_spectrogram"].sort_values("sample_id")
+                record = {
+                    "labels": temporal["target"].to_numpy(np.int64),
+                    "prediction_a": spectrogram["prediction"].to_numpy(np.int64),
+                    "prediction_b": temporal["prediction"].to_numpy(np.int64),
+                }
+                if dataset == "vsb":
+                    record["group_ids"] = temporal["id_measurement"].astype(str).to_numpy()
+                records.append(record)
+            if dataset == "vsb":
+                aggregate = hierarchical_grouped_delta_ci(records, "global_spectrogram_minus_temporal", iterations=10000, seed=42042)
+            else:
+                aggregate = hierarchical_paired_delta_ci(records, "global_spectrogram_minus_temporal", iterations=10000, seed=42042)
+            hierarchical.append({"dataset": dataset, **aggregate, "mean_delta": float(deltas.mean()), "sd_delta": float(deltas.std(ddof=1)), "min_delta": float(deltas.min()), "max_delta": float(deltas.max()), "positive_seeds": int((deltas > 0).sum()), "oracle_headroom_mean": float(rows["oracle_headroom"].mean())})
     atomic_json(output / "hierarchical_bootstrap.json", hierarchical)
     regression = _regression(config, metrics)
     atomic_json(output / "regression.json", regression)
@@ -538,6 +555,7 @@ def stage_report(config: dict[str, Any], output: Path, logger: logging.Logger) -
         "regression_ok": bool(regression["passed"]),
         "metrics": metric_frame.to_dict(orient="records"),
         "bootstrap": bootstrap_frame.to_dict(orient="records"),
+        "hierarchical_bootstrap": json.loads((output / "hierarchical_bootstrap.json").read_text(encoding="utf-8")),
         "regression": regression,
         "representation": "one global VSB 800000-sample log10-power STFT; no event detector, local windows, MIL, mask, CWT rerun, or adaptive fusion",
         "holdouts": "locked",
