@@ -115,4 +115,3 @@ def test_gates_are_predeclared_and_dataset_specific():
         "best_fixed_minus_best_individual": {"seed_deltas": [0.01, 0.02, 0.01], "hierarchical_ci": {"ci_95": [0.001, 0.03]}},
     }
     assert fusion_gate(summary)["eligible"]
-
