@@ -64,4 +64,3 @@ closed during development. Historical metrics cannot enter active decisions.
 The report must identify whether a dataset passed independently and must not
 pool raw observations across datasets. Generated predictions, caches,
 checkpoints, and large tables remain ignored and outside Git.
-
