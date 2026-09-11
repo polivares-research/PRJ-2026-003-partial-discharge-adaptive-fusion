@@ -65,6 +65,35 @@ class SmallSpectrogram2DCNN(nn.Module):
         return (logits, embedding) if return_embedding else logits
 
 
+class GlobalSpectrogram2DCNN(nn.Module):
+    """Strided encoder for one full-signal VSB spectrogram.
+
+    This model consumes exactly one ``[frequency, time]`` representation per
+    parent signal. It has no event axis, validity mask, or MIL aggregation.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 16, 7, stride=2, padding=3), nn.BatchNorm2d(16), nn.GELU(),
+            nn.Conv2d(16, 32, 5, stride=2, padding=2), nn.BatchNorm2d(32), nn.GELU(),
+            nn.Conv2d(32, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.GELU(),
+            nn.Conv2d(64, 64, 3, stride=2, padding=1), nn.BatchNorm2d(64), nn.GELU(),
+            nn.AdaptiveAvgPool2d(1),
+        )
+        self.classifier = nn.Linear(64, 1)
+
+    def forward(self, x, return_embedding: bool = False):
+        if x.ndim != 4 or x.shape[1] != 1 or min(x.shape[-2:]) < 8:
+            raise ValueError(
+                "Expected [batch, 1, frequency, time] with dimensions >= 8, "
+                f"got {tuple(x.shape)}"
+            )
+        embedding = self.features(x).flatten(1)
+        logits = self.classifier(embedding).squeeze(-1)
+        return (logits, embedding) if return_embedding else logits
+
+
 class _ResidualTemporalBlock(nn.Module):
     """Compact residual block used by the V4 geometry-adapted temporal expert."""
 
@@ -163,6 +192,8 @@ def make_expert(kind: str) -> nn.Module:
         return SmallCWT2DCNN()
     if kind in {"spectrogram", "matlab_spectrogram"}:
         return SmallSpectrogram2DCNN()
+    if kind in {"global_spectrogram", "vsb_global_spectrogram"}:
+        return GlobalSpectrogram2DCNN()
     if kind in {"v4_temporal", "geometry_adapted_temporal"}:
         return V4MultiScaleTemporalCNN()
     if kind in {"v4_cwt", "geometry_adapted_cwt"}:

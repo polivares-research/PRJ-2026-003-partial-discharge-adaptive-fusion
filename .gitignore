@@ -102,6 +102,12 @@ results/features/**
 # for the source repository; compact protocol manifests remain trackable.
 results/manifests/matlab_manifest.csv
 reports/figures/confirmatory/**
+results/cache/full-signal-spectrogram-cross-dataset/**
+results/audits/full-signal-spectrogram-cross-dataset/**
+reports/figures/full-signal-spectrogram-cross-dataset/**
+results/cache/current-expert-adaptive-fusion/**
+results/audits/current-expert-adaptive-fusion/**
+reports/figures/current-expert-adaptive-fusion/**
 reports/metrics/confirmatory/**
 reports/statistical_analysis/confirmatory/**
 
