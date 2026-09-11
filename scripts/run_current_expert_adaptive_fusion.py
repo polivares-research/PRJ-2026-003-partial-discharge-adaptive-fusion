@@ -349,7 +349,16 @@ def stage_freeze(config: dict[str, Any], config_path: Path, output: Path, logger
     gate = json.loads((output / "development_gate.json").read_text(encoding="utf-8"))
     eligible = gate.get("eligible_datasets", [])
     if not eligible:
-        raise RuntimeError("No dataset passed the development fusion gate; holdouts remain locked")
+        payload = {
+            "status": "BLOCKED_NO_ELIGIBLE_DATASET",
+            "eligible_datasets": [],
+            "frozen_config": None,
+            "holdouts_opened": [],
+            "reason": "No dataset passed both the expert and fusion development gates",
+        }
+        finish(output, "freeze", payload)
+        logger.warning("freeze BLOCKED: no dataset passed development gates; holdouts remain locked")
+        return
     frozen = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     frozen["protocol_status"] = "frozen"
     frozen["freeze_record"] = {
